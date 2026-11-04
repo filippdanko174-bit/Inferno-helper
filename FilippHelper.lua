@@ -530,6 +530,364 @@ uiHandlers[D_GWSTART] = function(button, _, input)
 end
 
 ----------------------------------------------------------------------
+-- МЕРОПРИЯТИЯ: готовые анонсы в /aad
+----------------------------------------------------------------------
+local D_EV, D_FR, D_FRACT, D_NOTES, D_NOTE, D_NOTEADD = 4140, 4141, 4142, 4144, 4145, 4146
+
+-- {ключ, название, строки анонса}. {id} подставляется для интерактивных МП.
+local EVENTS = {
+    { "svet", "Светофор", "Бежим к финишу на «Зелёный» и замираем на «Красный».", "Кто двинулся на красный - вылетает. Побеждает первый на финише." },
+    { "poliv", "Поливалка", "Нужно удержаться на крыше, пока вас поливают из БТР.", "Оружие и толчки запрещены. Побеждает последний оставшийся." },
+    { "derbi", "Дерби", "Садимся в машины и таранитесь на арене.", "Побеждает тот, чья машина осталась на ходу последней." },
+    { "pryat", "Прятки", "Прячьтесь от ведущего где угодно на локации.", "По команде можно пользоваться масками и анимациями." },
+    { "parkur", "Паркур", "Кто быстрее всех доберётся до вершины паркур-зоны?", "Без оружия, помех другим и багов." },
+    { "rulet", "Русская рулетка", "Встаём в строй и по очереди пытаем удачу.", "Строй не нарушать, оружие и анимации не использовать." },
+    { "kovsh", "Гонки от Ковша", "Игроки на квадроциклах уворачиваются от Гелика с ковшом.", "Баги, ремонт машин и сторонний софт запрещены. Выживает последний." },
+    { "myaso", "Мясорубка", "Бегаем по локации и уходим от бензопилы ведущего.", "Без оружия, брони и масок. Побеждает последний выживший." },
+    { "dogon", "Догонялки", "Ведущий гонится за игроками.", "Кого ударили кулаком - тот выбыл. Анимации и баги запрещены." },
+    { "car", "Царь горы", "Заберитесь на вершину горы из объектов и держитесь.", "Только кулаки, без оружия и масок. Побеждает тот, кто остался наверху." },
+    { "parash", "Прыжки с парашютом", "Все получают парашюты и приземляются на метку ведущего.", "Промазал или разбился - выбыл. Важна точность." },
+    { "digl", "Король Дигла", "Каждому выдаётся Deagle.", "Нужно убрать всех соперников. Побеждает последний живой." },
+    { "sultan", "Увернись от Султана", "Игроки в строю, ведущий едет на машине.", "Кого задели - тот выбыл. Нужно вовремя подпрыгнуть." },
+    { "paint", "Пейнтбол", "Каждый сам за себя, считаются убийства.", "Побеждает тот, у кого в конце больше фрагментов." },
+    { "krug", "Круг Смерти", "Игроки встают кругом, ведущий выдаёт Deagle с одним патроном.", "Задача - выстрелить в оппонента." },
+    { "infern", "Догони Инфернус", "Найдите на карте ЧЁРНЫЙ INFERNUS ведущего и передайте ему 1 рубль: /pay {id} 1.", "Читы и помехи запрещены. Побеждает первый, кто передал." },
+}
+
+local function eventByKey(key)
+    key = lower1251(key or "")
+    for i, e in ipairs(EVENTS) do if e[1] == key then return e, i end end
+end
+
+local function announceEvent(e, arg)
+    local id = (arg ~= nil and arg:match("^%d+$")) or watchedId
+    local lines = { string.format("/aad [МП] Внимание, игроки! Скоро стартует мероприятие «%s».", e[2]) }
+    for k = 3, #e do
+        local line = e[k]
+        if line:find("{id}", 1, true) then
+            if not id then fmsg("Нужен ID ведущего: /ev " .. e[1] .. " ID") return end
+            line = line:gsub("{id}", id)
+        end
+        lines[#lines + 1] = "/aad [МП] " .. line
+    end
+    sendSeq(lines, SEND_GAP)
+end
+
+local function uiEvents()
+    local t = {}
+    for i, e in ipairs(EVENTS) do t[i] = string.format("{FFFFFF}%s {A9A9A9}(/ev %s)", e[2], e[1]) end
+    uiShow(D_EV, "FH | Мероприятия", table.concat(t, "\n"), "Объявить", "Закрыть", 2)
+end
+
+uiHandlers[D_EV] = function(button, list)
+    if button == 0 then return end
+    local e = EVENTS[list + 1]
+    if e then announceEvent(e) end
+end
+
+----------------------------------------------------------------------
+-- ФРАКЦИИ: наборы, отборы на лидера, временные лидерки
+----------------------------------------------------------------------
+-- {ключ, название, id для /templeader, тип}
+local FRACTIONS = {
+    { "rus", "Русская мафия", 14, "mafia" }, { "jap", "Японская мафия", 6, "mafia" }, { "ita", "Итальянская мафия", 5, "mafia" },
+    { "fun", "Похоронное бюро", 23, "mafia" }, { "out", "Outlaws MC", 28, "mafia" },
+    { "rif", "Rifa Gang", 18, "gang" }, { "bal", "Ballas Gang", 12, "gang" }, { "azt", "Aztec Gang", 17, "gang" },
+    { "gro", "Grove Street", 15, "gang" }, { "vag", "LS Vagos", 13, "gang" },
+    { "arm", "Армия ЛС", 3, "gov" }, { "hos", "Больница ЛС", 4, "gov" }, { "mer", "Мэрия", 7, "gov" },
+    { "rad", "Радиоцентр", 16, "gov" }, { "swt", "S.W.A.T", 25, "gov" }, { "gov", "Правительство", 26, "gov" },
+    { "lsp", "LSPD", 1, "gov" }, { "fbi", "FBI", 2, "gov" }, { "rcp", "RCPD", 27, "gov" }, { "sud", "Верховный суд", 29, "gov" },
+}
+local RULES_BY_KIND = { mafia = "правил бизваров", gang = "правил каптов", gov = "общих правил лидеров" }
+
+local function fractionByKey(key)
+    key = lower1251(key or "")
+    for _, f in ipairs(FRACTIONS) do if f[1] == key then return f end end
+end
+
+local function recruit(f)
+    sendSeq({
+        "/o [Набор] Внимание! Открыт набор в «" .. f[2] .. "».",
+        "/o [Набор] Подайте заявку через /rep +.",
+    }, 2500)
+end
+
+local function tryoutAad(f)
+    sendSeq({
+        "/aad [Отбор] Внимание! Проходит отбор на пост лидера: " .. f[2] .. ".",
+        "/aad [Отбор] Требования: возраст 13+, связь ВК, знание " .. RULES_BY_KIND[f[4]] .. ".",
+        "/aad [Отбор] Ждите открытия телепорта.",
+    }, SEND_GAP, function()
+        sampSetChatInputText("/mp ") sampSetChatInputEnabled(true)
+    end)
+end
+
+local function tryoutO(f)
+    sendSeq({
+        "/o [Отбор] Идёт отбор на пост лидера: " .. f[2] .. ".",
+        "/o [Отбор] Нужно: 13+, связь ВК, знание " .. RULES_BY_KIND[f[4]] .. ".",
+        "/o [Отбор] Желающие - пишите /gomp.",
+    }, 2500)
+end
+
+local function tempLeader(f) safeSend("/templeader " .. f[3]) end
+
+local function uiFractions()
+    local t = {}
+    for i, f in ipairs(FRACTIONS) do t[i] = string.format("{FFFFFF}%s {A9A9A9}(%s)", f[2], f[1]) end
+    uiShow(D_FR, "FH | Фракции", table.concat(t, "\n"), "Выбрать", "Закрыть", 2)
+end
+
+uiHandlers[D_FR] = function(button, list)
+    if button == 0 then return end
+    local f = FRACTIONS[list + 1]
+    if not f then return uiFractions() end
+    ui.fr = list + 1
+    uiShow(D_FRACT, f[2],
+        "Набор (в общий чат /o)\nОтбор на лидера (/aad)\nОтбор на лидера (общий чат /o)\nВзять временную лидерку себе\nНазад",
+        "Выбрать", "Закрыть", 2)
+end
+
+uiHandlers[D_FRACT] = function(button, list)
+    if button == 0 then return end
+    local f = FRACTIONS[ui.fr or 0]
+    if not f then return uiFractions() end
+    if list == 0 then recruit(f)
+    elseif list == 1 then tryoutAad(f)
+    elseif list == 2 then tryoutO(f)
+    elseif list == 3 then tempLeader(f)
+    else uiFractions() end
+end
+
+----------------------------------------------------------------------
+-- ШПАРГАЛКИ: свои заметки (правила, ответы), хранятся в файле
+----------------------------------------------------------------------
+local notes = {}   -- { {title=, lines={}}, ... }
+local NOTE_MAX, NOTE_LINES = 40, 30
+local notesFile
+
+local function notesPath()
+    if not notesFile then
+        local dir = getWorkingDirectory() .. "/config"
+        pcall(createDirectory, dir)
+        notesFile = dir .. "/FilippHelper_notes.txt"
+    end
+    return notesFile
+end
+
+local function saveNotes()
+    local ok = pcall(function()
+        local f = assert(io.open(notesPath(), "wb"))
+        for _, n in ipairs(notes) do
+            f:write("[", n.title, "]\r\n")
+            for _, l in ipairs(n.lines) do f:write("> ", l, "\r\n") end
+        end
+        f:close()
+    end)
+    if not ok then fmsg("Не удалось сохранить заметки в файл!") end
+end
+
+local function loadNotes()
+    local ok, err = pcall(function()
+        local f = io.open(notesPath(), "rb")
+        if not f then return end
+        local cur
+        for line in f:lines() do
+            line = line:gsub("\r$", "")
+            local t = line:match("^%[(.+)%]$")
+            if t then
+                if #notes < NOTE_MAX then cur = { title = t:sub(1, 40), lines = {} } notes[#notes + 1] = cur else cur = nil end
+            elseif cur and line:sub(1, 2) == "> " and #cur.lines < NOTE_LINES then
+                cur.lines[#cur.lines + 1] = line:sub(3)
+            end
+        end
+        f:close()
+    end)
+    if not ok then print("[FH] notes load error: " .. tostring(err)) end
+end
+
+local function findNote(title)
+    title = lower1251(trim(title or ""))
+    for i, n in ipairs(notes) do if lower1251(n.title) == title then return n, i end end
+end
+
+local function noteAdd(title, text)
+    title = trim(title:gsub("[%[%]]", ""))
+    if title == "" or #title > 40 then return false, "Название: до 40 символов." end
+    local n = findNote(title)
+    if not n then
+        if #notes >= NOTE_MAX then return false, "Лимит заметок: " .. NOTE_MAX end
+        n = { title = title, lines = {} }
+        notes[#notes + 1] = n
+    end
+    local added = 0
+    for piece in (text .. ";;"):gmatch("(.-);;") do
+        piece = trim(piece)
+        if piece ~= "" and #n.lines < NOTE_LINES then n.lines[#n.lines + 1] = piece added = added + 1 end
+    end
+    if added == 0 then
+        if #n.lines == 0 then table.remove(notes) end
+        return false, "Пустой текст, ничего не добавлено."
+    end
+    saveNotes()
+    return true, string.format("Заметка «%s»: добавлено строк %d (всего %d).", n.title, added, #n.lines)
+end
+
+local function uiNotes()
+    local t = { "{33CC33}[+] Новая заметка" }
+    for _, n in ipairs(notes) do t[#t + 1] = string.format("{FFFFFF}%s {A9A9A9}- строк: %d", n.title, #n.lines) end
+    uiShow(D_NOTES, "FH | Шпаргалки", table.concat(t, "\n"), "Открыть", "Закрыть", 2)
+end
+
+uiHandlers[D_NOTES] = function(button, list)
+    if button == 0 then return end
+    if list == 0 then
+        uiShow(D_NOTEADD, "Новая заметка",
+            "Формат: название | текст\nНесколько строк разделяйте {FFFF00};;\n{A9A9A9}Пример: Нормы | Будни - 1 час ;; Выходные - 1.5 часа",
+            "Сохранить", "Назад", 1)
+    else
+        local n = notes[list]
+        if not n then return uiNotes() end
+        ui.note = list
+        uiShow(D_NOTE, n.title, table.concat(n.lines, "\n"), "Назад", "Удалить", 0)
+    end
+end
+
+uiHandlers[D_NOTEADD] = function(button, _, input)
+    if button == 0 then return uiNotes() end
+    local title, text = input:match("^(.-)%s*|%s*(.+)$")
+    if not title then fmsg("Формат: название | текст") return uiNotes() end
+    local _, msg = noteAdd(title, text)
+    fmsg(msg)
+    uiNotes()
+end
+
+uiHandlers[D_NOTE] = function(button)
+    if button == 0 and ui.note and notes[ui.note] then
+        fmsg("Заметка «" .. notes[ui.note].title .. "» удалена.")
+        table.remove(notes, ui.note)
+        saveNotes()
+    end
+    uiNotes()
+end
+
+----------------------------------------------------------------------
+-- КОМАНДЫ-СОКРАЩЕНИЯ, ОПРОС, ТАЙМЕР РЕСПАВНА
+----------------------------------------------------------------------
+-- {короткое имя, полная команда, режим}
+-- args - нужны параметры; idin - вставить "/cmd ID " в строку ввода; idopt - ID из аргумента или из /re;
+-- optargs - параметры необязательны; none - без параметров
+local ALIASES = {
+    { "jj", "jail", "idin" }, { "mm", "mute", "idin" }, { "ww", "warn", "idin" }, { "bb", "ban", "args" },
+    { "uw", "unwarn", "args" }, { "uj", "unjail", "args" }, { "unm", "unmute", "args" }, { "ub", "unban", "args" },
+    { "ib", "iban", "args" }, { "ip", "pgetip", "args" }, { "bip", "banip", "args" },
+    { "ofl", "offleader", "args" }, { "mkl", "makeleader", "args" },
+    { "fuel", "fuelcars", "none" }, { "gh", "ghetto", "none" }, { "gzc", "gzcolor", "args" },
+    { "wh", "warehouse", "optargs" }, { "gs", "getstats", "idopt" }, { "inv", "checkinv", "idopt" },
+    { "bp", "setbizprod", "args" },
+}
+
+local function regAlias(reg, a)
+    local short, full, mode = a[1], a[2], a[3]
+    reg(short, function(p)
+        if mode == "none" then safeSend("/" .. full) return end
+        if mode == "optargs" then safeSend(p == "" and ("/" .. full) or ("/" .. full .. " " .. p)) return end
+        if mode == "idin" or mode == "idopt" then
+            local id = p:match("^(%d+)") or watchedId
+            if not id then fmsg("Укажите ID: /" .. short .. " ID") return end
+            if mode == "idin" then
+                sampSetChatInputText(string.format("/%s %s ", full, id)) sampSetChatInputEnabled(true)
+            else safeSend(string.format("/%s %s", full, id)) end
+            return
+        end
+        if p == "" then fmsg("Укажите параметры: /" .. short .. " ...") return end
+        safeSend("/" .. full .. " " .. p)
+    end)
+end
+
+local vrThread
+local function registerExtra(reg)
+    reg("ev", function(p)
+        local key, arg = p:match("^(%S+)%s*(.*)$")
+        local e = key and eventByKey(key)
+        if e then announceEvent(e, arg) elseif key then fmsg("Нет такого МП: " .. key .. ". Список: /ev") else uiEvents() end
+    end)
+    local function byKey(cmd, fn)
+        reg(cmd, function(p)
+            local f = fractionByKey(trim(p))
+            if f then fn(f) else fmsg("Укажите фракцию: /" .. cmd .. " ключ (список ключей: /fr)") end
+        end)
+    end
+    byKey("nab", recruit) byKey("otb", tryoutAad) byKey("otbo", tryoutO) byKey("lead", tempLeader)
+    reg("fr", uiFractions)
+
+    reg("note", function(p)
+        local sub, rest = p:match("^(%S+)%s*(.*)$")
+        if sub == "add" then
+            local title, text = rest:match("^(.-)%s*|%s*(.+)$")
+            if not title then fmsg("Использование: /note add название | текст") return end
+            local _, msg = noteAdd(title, text) fmsg(msg)
+        elseif sub == "del" then
+            local n, i = findNote(rest)
+            if not n then fmsg("Заметка не найдена.") return end
+            table.remove(notes, i) saveNotes() fmsg("Заметка удалена.")
+        elseif sub == "show" then
+            local n = findNote(rest)
+            if not n then fmsg("Заметка не найдена.") return end
+            uiShow(D_NOTE, n.title, table.concat(n.lines, "\n"), "Назад", "Закрыть", 0)
+        else uiNotes() end
+    end)
+    reg("notes", uiNotes)
+
+    for _, a in ipairs(ALIASES) do regAlias(reg, a) end
+
+    reg("poll", function(p)
+        local who = trim(p)
+        if who == "" then fmsg("Использование: /poll должность и ник (например: /poll ГА Ivan_Ivanov)") return end
+        sendSeq({
+            "/aad [Опрос] Игроки, уделите минуту!",
+            "/aad [Опрос] Оцените работу: " .. who .. ". Отправьте в /rep цифру от 1 до 5.",
+        }, SEND_GAP)
+    end)
+
+    reg("ar", function(p)
+        local id = p:match("^(%d+)") or watchedId
+        if not id then fmsg("Использование: /ar ID") return end
+        local text
+        for _, r in ipairs(reports) do if r.id == id then text = r.text break end end
+        local name = "ID " .. id
+        for _, r in ipairs(reports) do if r.id == id then name = r.name .. "[" .. id .. "]" break end end
+        sendSeq({
+            string.format("/pm %s Здравствуйте, ваша жалоба принята, передаю её администрации.", id),
+            "/a Коллеги, отвечаем на репорт!",
+            string.format("/a %s | Жалоба: %s", name, text or "текст не найден, смотрите /report"),
+        }, SEND_GAP)
+    end)
+
+    reg("vr", function()
+        if vrThread then fmsg("Таймер уже идёт (остановить: /vrstop).") return end
+        vrThread = lua_thread.create(function()
+            pcall(function()
+                safeSend("/a Через 15 секунд весь транспорт на сервере будет удалён и возвращён на места!")
+                wait(15000)
+                safeSend("/dvall") wait(1500)
+                safeSend("/spawncars")
+            end)
+            vrThread = nil
+        end)
+    end)
+    reg("vrstop", function()
+        if vrThread then
+            pcall(function() vrThread:terminate() end)
+            vrThread = nil
+            fmsg("Таймер респавна остановлен.")
+        else fmsg("Таймер не запущен.") end
+    end)
+
+    loadNotes()
+end
+
+----------------------------------------------------------------------
 -- ГЛАВНОЕ МЕНЮ /fh
 ----------------------------------------------------------------------
 local D_CMDS, D_CMDPAGE = 4130, 4131
@@ -553,6 +911,28 @@ local CMD_PAGES = {
       "{66CCFF}/bnd show имя, /bnd list {FFFFFF}- просмотр\n\n" ..
       "{A9A9A9}В тексте: {FFFF00}{id}{A9A9A9} - ID игрока, {FFFF00}{arg}{A9A9A9} - текст после команды.\n" ..
       "Строка с / уходит как команда, остальное - в обычный чат." },
+    { "Мероприятия",
+      "{66CCFF}/ev {FFFFFF}- список МП, выбрали - объявление ушло в /aad\n" ..
+      "{66CCFF}/ev ключ {FFFFFF}- сразу объявить (например /ev svet). Для «infern»: /ev infern ID\n\n" ..
+      "{A9A9A9}Ключи: svet poliv derbi pryat parkur rulet kovsh myaso dogon car parash digl sultan paint krug infern" },
+    { "Фракции",
+      "{66CCFF}/fr {FFFFFF}- окно фракций: набор, отбор, временная лидерка\n" ..
+      "{66CCFF}/nab ключ {FFFFFF}- набор в /o\n" ..
+      "{66CCFF}/otb ключ {FFFFFF}- отбор на лидера в /aad (потом откроется ввод /mp)\n" ..
+      "{66CCFF}/otbo ключ {FFFFFF}- отбор на лидера в /o\n" ..
+      "{66CCFF}/lead ключ {FFFFFF}- взять временную лидерку (/templeader)\n\n" ..
+      "{A9A9A9}Ключи: rus jap ita fun out rif bal azt gro vag arm hos mer rad swt gov lsp fbi rcp sud" },
+    { "Наказания",
+      "{FFFFFF}Вставляют команду с ID в строку ввода: {66CCFF}/jj /mm /ww {A9A9A9}(jail, mute, warn)\n" ..
+      "{FFFFFF}С параметрами: {66CCFF}/bb /uw /uj /unm /ub /ib /ip /bip /ofl /mkl /gzc /bp\n" ..
+      "{FFFFFF}По ID или из /re: {66CCFF}/gs /inv {A9A9A9}(getstats, checkinv)\n" ..
+      "{FFFFFF}Без параметров: {66CCFF}/fuel /gh /wh\n\n" ..
+      "{A9A9A9}Расшифровка: bb-ban, uw-unwarn, uj-unjail, unm-unmute, ub-unban, ib-iban, ip-pgetip,\nbip-banip, ofl-offleader, mkl-makeleader, gzc-gzcolor, bp-setbizprod, wh-warehouse." },
+    { "Прочее",
+      "{66CCFF}/ar ID {FFFFFF}- ответ на репорт: /pm игроку + текст жалобы в /a\n" ..
+      "{66CCFF}/poll должность ник {FFFFFF}- опрос игроков об оценке работы админа\n" ..
+      "{66CCFF}/vr {FFFFFF}- через 15 сек удалить и вернуть весь транспорт, {66CCFF}/vrstop {FFFFFF}- отмена\n" ..
+      "{66CCFF}/notes {FFFFFF}- шпаргалки; {66CCFF}/note add название | текст{FFFFFF}, {66CCFF}/note del название" },
     { "Общее",
       "{66CCFF}/fh {FFFFFF}- главное меню\n" ..
       "{66CCFF}/fcmd {FFFFFF}- это окно со списком команд\n" ..
@@ -579,7 +959,7 @@ end
 
 local function uiMenu()
     uiShow(D_MENU, "FH " .. VERSION .. " | Меню",
-        "Биндер (свои команды)\nРепорты\nЗапустить раздачу\nСписок команд",
+        "Биндер (свои команды)\nРепорты\nЗапустить раздачу\nМероприятия\nФракции: наборы, отборы, лидерки\nШпаргалки (заметки)\nСписок команд",
         "Выбрать", "Закрыть", 2)
 end
 
@@ -590,6 +970,9 @@ uiHandlers[D_MENU] = function(button, list)
     elseif list == 2 then
         uiShow(D_GWSTART, "Новая раздача",
             "Формат: слово | приз\nПример: {FFFF00}котик | банк 500000", "Старт", "Назад", 1)
+    elseif list == 3 then uiEvents()
+    elseif list == 4 then uiFractions()
+    elseif list == 5 then uiNotes()
     else uiCommands() end
 end
 
@@ -631,6 +1014,7 @@ end
 -- ЗАПУСК
 ----------------------------------------------------------------------
 local function registerCommands(reg)
+    registerExtra(reg)
     reg("fh", uiMenu)
     reg("reports", uiReports)
     reg("fcmd", uiCommands)
