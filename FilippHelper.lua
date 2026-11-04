@@ -532,23 +532,54 @@ end
 ----------------------------------------------------------------------
 -- ГЛАВНОЕ МЕНЮ /fh
 ----------------------------------------------------------------------
-local function uiHelp()
-    uiShow(D_MENU + 9, "FH | Справка",
-        "{66CCFF}/fh {FFFFFF}- главное меню\n" ..
-        "{66CCFF}/fbind {FFFFFF}- окно биндера, {66CCFF}/bnd{FFFFFF} - команды биндера (справка: /binder)\n" ..
-        "{66CCFF}/reports{FFFFFF} - последние репорты и быстрый ответ\n" ..
-        "{66CCFF}/rr [ID] текст{FFFFFF} - ответить игроку через /pm (ID по умолчанию из /re)\n" ..
-        "{66CCFF}/gw слово | приз{FFFFFF} - раздача. Приз: тип и число, например {FFFF00}банк 500000{FFFFFF}, {FFFF00}лвл 3{FFFFFF}, {FFFF00}#9 15{FFFFFF} (номер статы)\n" ..
-        "{66CCFF}/gwlast слово | приз{FFFFFF} - финальный раунд (сам закроет раздачу)\n" ..
-        "{66CCFF}/gwstop{FFFFFF} - отменить раздачу\n\n" ..
-        "{A9A9A9}Свои сокращения команд и объявления создавайте в биндере, например:\n" ..
-        "{FFFF00}/bnd add jl /jail {id} {arg}",
-        "Закрыть", "", 0)
+local D_CMDS, D_CMDPAGE = 4130, 4131
+local CMD_PAGES = {
+    { "Раздачи",
+      "{66CCFF}/gw слово | приз {FFFFFF}- запустить раздачу\n" ..
+      "{66CCFF}/gwlast слово | приз {FFFFFF}- финальный раунд, сам закроет раздачу\n" ..
+      "{66CCFF}/gwstop {FFFFFF}- отменить раздачу\n\n" ..
+      "{A9A9A9}Приз: тип и число. Примеры: {FFFF00}банк 500000{A9A9A9}, {FFFF00}лвл 3{A9A9A9}, {FFFF00}#9 15{A9A9A9} (номер статы).\n" ..
+      "Типы: банк, лвл, мат, опыт, закон, сим, бокс, кунг, кик." },
+    { "Репорты",
+      "{66CCFF}/reports {FFFFFF}- последние 15 репортов, выбрали - ответили\n" ..
+      "{66CCFF}/rr [ID] текст {FFFFFF}- ответ игроку через /pm\n\n" ..
+      "{A9A9A9}Если ID не указан, берётся игрок из последней команды /re." },
+    { "Биндер",
+      "{66CCFF}/fbind {FFFFFF}- окно биндера\n" ..
+      "{66CCFF}/bnd add имя текст {FFFFFF}- создать бинд / добавить строку (несколько через ;;)\n" ..
+      "{66CCFF}/bnd rm имя N {FFFFFF}- удалить строку\n" ..
+      "{66CCFF}/bnd del имя {FFFFFF}- удалить бинд\n" ..
+      "{66CCFF}/bnd delay имя мс {FFFFFF}- пауза между строками\n" ..
+      "{66CCFF}/bnd show имя, /bnd list {FFFFFF}- просмотр\n\n" ..
+      "{A9A9A9}В тексте: {FFFF00}{id}{A9A9A9} - ID игрока, {FFFF00}{arg}{A9A9A9} - текст после команды.\n" ..
+      "Строка с / уходит как команда, остальное - в обычный чат." },
+    { "Общее",
+      "{66CCFF}/fh {FFFFFF}- главное меню\n" ..
+      "{66CCFF}/fcmd {FFFFFF}- это окно со списком команд\n" ..
+      "{66CCFF}/binder {FFFFFF}- справка по биндеру\n\n" ..
+      "{A9A9A9}Свои сокращения создавайте в биндере, например:\n{FFFF00}/bnd add jl /jail {id} {arg}" },
+}
+
+local function uiCommands()
+    local t = {}
+    for i, p in ipairs(CMD_PAGES) do t[i] = "{FFFFFF}" .. p[1] end
+    uiShow(D_CMDS, "FH | Команды", table.concat(t, "\n"), "Открыть", "Закрыть", 2)
+end
+
+uiHandlers[D_CMDS] = function(button, list)
+    if button == 0 then return end
+    local p = CMD_PAGES[list + 1]
+    if not p then return uiCommands() end
+    uiShow(D_CMDPAGE, "FH | " .. p[1], p[2], "Назад", "Закрыть", 0)
+end
+
+uiHandlers[D_CMDPAGE] = function(button)
+    if button == 1 then uiCommands() end
 end
 
 local function uiMenu()
     uiShow(D_MENU, "FH " .. VERSION .. " | Меню",
-        "Биндер (свои команды)\nРепорты\nЗапустить раздачу\nСправка",
+        "Биндер (свои команды)\nРепорты\nЗапустить раздачу\nСписок команд",
         "Выбрать", "Закрыть", 2)
 end
 
@@ -559,9 +590,8 @@ uiHandlers[D_MENU] = function(button, list)
     elseif list == 2 then
         uiShow(D_GWSTART, "Новая раздача",
             "Формат: слово | приз\nПример: {FFFF00}котик | банк 500000", "Старт", "Назад", 1)
-    else uiHelp() end
+    else uiCommands() end
 end
-uiHandlers[D_MENU + 9] = function() uiMenu() end
 
 ----------------------------------------------------------------------
 -- ОБРАБОТКА СООБЩЕНИЙ СЕРВЕРА
@@ -603,6 +633,7 @@ end
 local function registerCommands(reg)
     reg("fh", uiMenu)
     reg("reports", uiReports)
+    reg("fcmd", uiCommands)
     reg("gw", function(p) gwStart(p, false) end)
     reg("gwlast", function(p) gwStart(p, true) end)
     reg("gwstop", function()
