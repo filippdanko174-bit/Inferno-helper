@@ -964,24 +964,44 @@ uiHandlers[D_CMDPAGE] = function(button)
     if button == 1 then uiCommands() end
 end
 
+-- Окно /fh: таблица всех команд
+local MENU_ROWS = {
+    { "#", "Раздачи" },
+    { "/gw слово | приз", "запустить раздачу (банк 500000, лвл 3, #9 15)" },
+    { "/gwlast слово | приз", "финальный раунд, сам закроет раздачу" },
+    { "/gwstop", "отменить раздачу" },
+    { "#", "Репорты" },
+    { "/reports", "последние 15 репортов, быстрый ответ" },
+    { "/rr [ID] текст", "ответить игроку через /pm" },
+    { "/ar ID", "ответ + текст жалобы в /a" },
+    { "#", "Мероприятия и опросы" },
+    { "/ev [ключ] [ID]", "анонс МП в /aad (список: /ev)" },
+    { "/poll должность ник", "опрос об оценке работы админа" },
+    { "#", "Фракции" },
+    { "/fr", "окно: набор, отбор, лидерка" },
+    { "/nab /otb /otbo /lead ключ", "набор /o, отбор /aad, отбор /o, лидерка" },
+    { "#", "Наказания" },
+    { "/jj /mm /ww [ID]", "jail, mute, warn - вставят команду в ввод" },
+    { "/bb /uw /uj /unm /ub", "ban, unwarn, unjail, unmute, unban" },
+    { "/ib /ip /bip /ofl /mkl", "iban, pgetip, banip, offleader, makeleader" },
+    { "/gs /inv [ID]", "getstats, checkinv (ID или из /re)" },
+    { "/fuel /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
+    { "#", "Прочее" },
+    { "/vr  /vrstop", "респавн транспорта через 15 сек / отмена" },
+    { "/fbind  /bnd", "свой биндер: окно и команды (справка /binder)" },
+    { "/notes", "шпаргалки (свои заметки)" },
+}
+
 local function uiMenu()
-    uiShow(D_MENU, "FH " .. VERSION .. " | Меню",
-        "Биндер (свои команды)\nРепорты\nЗапустить раздачу\nМероприятия\nФракции: наборы, отборы, лидерки\nШпаргалки (заметки)\nСписок команд",
-        "Выбрать", "Закрыть", 2)
+    local t = { "{A9A9A9}Команда\t{A9A9A9}Что делает" }
+    for _, r in ipairs(MENU_ROWS) do
+        if r[1] == "#" then t[#t + 1] = "{66CCFF}" .. r[2] .. "\t"
+        else t[#t + 1] = "{FFFF00}" .. r[1] .. "\t{FFFFFF}" .. r[2] end
+    end
+    uiShow(D_MENU, "FH " .. VERSION .. " | Команды", table.concat(t, "\n"), "Закрыть", "", 5)
 end
 
-uiHandlers[D_MENU] = function(button, list)
-    if button == 0 then return end
-    if list == 0 then uiMain()
-    elseif list == 1 then uiReports()
-    elseif list == 2 then
-        uiShow(D_GWSTART, "Новая раздача",
-            "Формат: слово | приз\nПример: {FFFF00}котик | банк 500000", "Старт", "Назад", 1)
-    elseif list == 3 then uiEvents()
-    elseif list == 4 then uiFractions()
-    elseif list == 5 then uiNotes()
-    else uiCommands() end
-end
+uiHandlers[D_MENU] = function() end
 
 ----------------------------------------------------------------------
 -- ОБРАБОТКА СООБЩЕНИЙ СЕРВЕРА
@@ -1024,7 +1044,7 @@ local function registerCommands(reg)
     registerExtra(reg)
     reg("fh", uiMenu)
     reg("reports", uiReports)
-    reg("fcmd", uiCommands)
+    reg("fcmd", uiMenu)
     reg("gw", function(p) gwStart(p, false) end)
     reg("gwlast", function(p) gwStart(p, true) end)
     reg("gwstop", function()
