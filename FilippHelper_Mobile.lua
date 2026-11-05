@@ -416,6 +416,7 @@ local cfg = {
     accent = { 0.26, 0.62, 0.96 },  -- цвет акцента окна
     bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
     alpha = 0.97,                   -- прозрачность фона
+    glass = true,                   -- стиль Liquid Glass (стекло)
 }
 
 local function configDir()
@@ -437,6 +438,7 @@ local function saveCfg()
         f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
+        f:write("glass=", cfg.glass and "1" or "0", "\r\n")
         f:close()
     end)
 end
@@ -449,6 +451,7 @@ local function loadCfg()
             line = line:gsub("\r$", "")
             local k, v = line:match("^(%w+)=(.+)$")
             if k == "automp" then cfg.automp = (v == "1")
+            elseif k == "glass" then cfg.glass = (v == "1")
             elseif k == "alpha" then cfg.alpha = math.max(0.5, clamp01(v, cfg.alpha))
             elseif k == "accent" or k == "bg" then
                 local r, g, b = v:match("^([%d%.]+),([%d%.]+),([%d%.]+)$")
@@ -1284,6 +1287,7 @@ local function setupGui()
     local bgBuf = imgui.new.float[3](cfg.bg[1], cfg.bg[2], cfg.bg[3])
     local alphaBuf = imgui.new.float(cfg.alpha)
     local autoBuf = imgui.new.bool(cfg.automp)
+    local glassBuf = imgui.new.bool(cfg.glass)
     local applyStyle   -- определяется ниже
 
     local function getBuf(b) return fromUi(ffi.string(b)) end
@@ -1525,6 +1529,13 @@ local function setupGui()
             alphaBuf[0] = 0.97
             applyColors()
         end
+        imgui.Spacing()
+        if imgui.Checkbox(U("Стиль Liquid Glass (стекло)"), glassBuf) then
+            cfg.glass = glassBuf[0] and true or false
+            applyStyle()
+            post(saveCfg)
+        end
+        hint("Полупрозрачные панели и цветные блики. Прозрачность регулируется ползунком выше.")
         imgui.Spacing() imgui.Separator() imgui.Spacing()
         title("Мероприятия")
         if imgui.Checkbox(U("После анонса МП вводить /mp и нажимать 1-ю строку"), autoBuf) then
@@ -1593,24 +1604,69 @@ local function setupGui()
 
     applyStyle = function()
         local st = imgui.GetStyle()
-        st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding = 10, 8, 6, 6
-        st.WindowPadding, st.FramePadding, st.ItemSpacing = V2(12, 12), V2(8, 6), V2(8, 8)
         local c, Col = st.Colors, imgui.Col
         local function set(k, r, g, b, a) c[Col[k]] = imgui.ImVec4(r, g, b, a or 1) end
         local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
         local br, bg_, bb = cfg.bg[1], cfg.bg[2], cfg.bg[3]
         local function lift(v, d) return math.max(0, math.min(1, v + d)) end
-        set("WindowBg", br, bg_, bb, cfg.alpha)
-        set("ChildBg", lift(br, 0.03), lift(bg_, 0.03), lift(bb, 0.04))
-        set("Border", lift(br, 0.13), lift(bg_, 0.14), lift(bb, 0.18)) set("Text", 0.92, 0.93, 0.95)
-        set("FrameBg", lift(br, 0.07), lift(bg_, 0.08), lift(bb, 0.10))
-        set("FrameBgHovered", lift(br, 0.11), lift(bg_, 0.13), lift(bb, 0.17)) set("FrameBgActive", lift(br, 0.13), lift(bg_, 0.16), lift(bb, 0.21))
-        set("TitleBg", lift(br, 0.02), lift(bg_, 0.02), lift(bb, 0.03)) set("TitleBgActive", lift(br, 0.04), lift(bg_, 0.05), lift(bb, 0.08))
-        set("Button", lift(br, 0.09), lift(bg_, 0.10), lift(bb, 0.14))
-        set("ButtonHovered", ar * 0.85, ag * 0.85, ab * 0.85) set("ButtonActive", ar * 0.7, ag * 0.7, ab * 0.7)
-        set("Header", ar * 0.75, ag * 0.75, ab * 0.75, 0.6) set("HeaderHovered", ar, ag, ab, 0.7) set("HeaderActive", ar, ag, ab)
-        set("CheckMark", ar, ag, ab) set("SliderGrab", ar, ag, ab) set("SliderGrabActive", ar * 0.8, ag * 0.8, ab * 0.8)
-        set("Separator", lift(br, 0.15), lift(bg_, 0.17), lift(bb, 0.22))
+        st.WindowPadding, st.FramePadding, st.ItemSpacing = V2(12, 12), V2(8, 6), V2(8, 8)
+        if cfg.glass then
+            -- Liquid Glass: полупрозрачные панели, светлые тонкие границы, большие скругления
+            st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding, st.ScrollbarRounding = 22, 16, 12, 10, 12
+            st.WindowBorderSize, st.ChildBorderSize, st.FrameBorderSize = 1, 1, 1
+            set("WindowBg", br, bg_, bb, cfg.alpha * 0.6)
+            set("ChildBg", 1, 1, 1, 0.06)
+            set("Border", 1, 1, 1, 0.28)
+            set("Text", 0.96, 0.97, 1.0)
+            set("FrameBg", 1, 1, 1, 0.08) set("FrameBgHovered", 1, 1, 1, 0.15) set("FrameBgActive", 1, 1, 1, 0.20)
+            set("TitleBg", br, bg_, bb, 0.35) set("TitleBgActive", br, bg_, bb, 0.55) set("TitleBgCollapsed", br, bg_, bb, 0.35)
+            set("Button", 1, 1, 1, 0.10) set("ButtonHovered", ar, ag, ab, 0.55) set("ButtonActive", ar, ag, ab, 0.75)
+            set("Header", ar, ag, ab, 0.35) set("HeaderHovered", ar, ag, ab, 0.50) set("HeaderActive", ar, ag, ab, 0.65)
+            set("CheckMark", ar, ag, ab) set("SliderGrab", ar, ag, ab) set("SliderGrabActive", ar * 0.8, ag * 0.8, ab * 0.8)
+            set("Separator", 1, 1, 1, 0.18)
+            set("ScrollbarBg", 0, 0, 0, 0) set("ScrollbarGrab", 1, 1, 1, 0.25)
+        else
+            st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding, st.ScrollbarRounding = 10, 8, 6, 6, 8
+            st.WindowBorderSize, st.ChildBorderSize, st.FrameBorderSize = 1, 1, 0
+            set("WindowBg", br, bg_, bb, cfg.alpha)
+            set("ChildBg", lift(br, 0.03), lift(bg_, 0.03), lift(bb, 0.04))
+            set("Border", lift(br, 0.13), lift(bg_, 0.14), lift(bb, 0.18)) set("Text", 0.92, 0.93, 0.95)
+            set("FrameBg", lift(br, 0.07), lift(bg_, 0.08), lift(bb, 0.10))
+            set("FrameBgHovered", lift(br, 0.11), lift(bg_, 0.13), lift(bb, 0.17)) set("FrameBgActive", lift(br, 0.13), lift(bg_, 0.16), lift(bb, 0.21))
+            set("TitleBg", lift(br, 0.02), lift(bg_, 0.02), lift(bb, 0.03)) set("TitleBgActive", lift(br, 0.04), lift(bg_, 0.05), lift(bb, 0.08))
+            set("Button", lift(br, 0.09), lift(bg_, 0.10), lift(bb, 0.14))
+            set("ButtonHovered", ar * 0.85, ag * 0.85, ab * 0.85) set("ButtonActive", ar * 0.7, ag * 0.7, ab * 0.7)
+            set("Header", ar * 0.75, ag * 0.75, ab * 0.75, 0.6) set("HeaderHovered", ar, ag, ab, 0.7) set("HeaderActive", ar, ag, ab)
+            set("CheckMark", ar, ag, ab) set("SliderGrab", ar, ag, ab) set("SliderGrabActive", ar * 0.8, ag * 0.8, ab * 0.8)
+            set("Separator", lift(br, 0.15), lift(bg_, 0.17), lift(bb, 0.22))
+        end
+    end
+
+    -- декор стекла: мягкие цветные блики за панелями и световая полоса сверху
+    local function drawGlass()
+        if not cfg.glass or G.noDeco then return end
+        local ok, err = pcall(function()
+            local dl = imgui.GetWindowDrawList()
+            local p, sz = imgui.GetWindowPos(), imgui.GetWindowSize()
+            local w, h = sz.x, sz.y
+            local function col(r, g, b, a) return imgui.ColorConvertFloat4ToU32(imgui.ImVec4(r, g, b, a)) end
+            local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
+            local blobs = {
+                { 0.78, 0.15, ar, ag, ab }, { 0.25, 0.90, ab, ar, ag },
+            }
+            local R = h * 0.35
+            for _, b in ipairs(blobs) do
+                for k = 0, 3 do
+                    dl:AddCircleFilled(V2(p.x + w * b[1], p.y + h * b[2]), R * (1 - k * 0.22), col(b[3], b[4], b[5], 0.05), 48)
+                end
+            end
+            local top, bot = col(1, 1, 1, 0.14), col(1, 1, 1, 0)
+            dl:AddRectFilledMultiColor(V2(p.x + 22, p.y + 2), V2(p.x + w - 22, p.y + h * 0.10), top, top, bot, bot)
+        end)
+        if not ok then
+            G.noDeco = true
+            print("[FH] glass decoration disabled: " .. tostring(err))
+        end
     end
 
     imgui.OnInitialize(function()
@@ -1627,6 +1683,7 @@ local function setupGui()
         imgui.SetNextWindowSize(V2(fs * 46, fs * 28), imgui.Cond.FirstUseEver)
         imgui.SetNextWindowPos(V2(sw / 2, sh / 2), imgui.Cond.FirstUseEver, V2(0.5, 0.5))
         if imgui.Begin("FilippHelper##fh", G.show, imgui.WindowFlags.NoCollapse) then
+            drawGlass()
             guarded(drawBody)
         end
         imgui.End()
