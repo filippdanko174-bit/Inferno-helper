@@ -1035,12 +1035,57 @@ end
 ----------------------------------------------------------------------
 local D_RULES = 4150
 
-local function sayA1()
-    sendSeq({
-        "/a Проверка активности следящей администрации!",
-        "/a Главные и заместители главных следящих - поставьте свой тег.",
-        "/a Подтвердите присутствие: напишите в /a цифру 1.",
-    }, SEND_GAP)
+local D_CHK = 4151
+local ROLES = {
+    { "io", "ИО" }, { "zo", "ЗО" }, { "po", "ПО" }, { "ks", "КС" }, { "zks", "ЗКС" },
+    { "ga", "ГА" }, { "zga", "ЗГА" }, { "gsg", "ГС госс" }, { "gsgh", "ГС гетто" }, { "gsm", "ГС мафии" },
+}
+
+-- sel: список названий должностей; пусто - общая проверка
+local function sayA1(sel)
+    local lines = { "/a Проверка активности администрации!" }
+    if sel and #sel > 0 then
+        lines[#lines + 1] = "/a Отзываются: " .. table.concat(sel, ", ") .. "."
+        lines[#lines + 1] = "/a Поставьте свой тег и напишите в /a цифру 1."
+    else
+        lines[#lines + 1] = "/a Главные и заместители главных следящих - поставьте свой тег."
+        lines[#lines + 1] = "/a Подтвердите присутствие: напишите в /a цифру 1."
+    end
+    sendSeq(lines, SEND_GAP)
+end
+
+local function roleByToken(tok)
+    tok = lower1251(tok):gsub("[%s,]", "")
+    for _, r in ipairs(ROLES) do
+        if r[1] == tok or lower1251(r[2]):gsub("%s", "") == tok then return r[2] end
+    end
+end
+
+local function sayA1Args(p)
+    local sel, bad = {}, {}
+    for tok in (p or ""):gmatch("[^%s,]+") do
+        local r = roleByToken(tok)
+        if r then sel[#sel + 1] = r else bad[#bad + 1] = tok end
+    end
+    if #bad > 0 then
+        local keys = {}
+        for _, r in ipairs(ROLES) do keys[#keys + 1] = r[1] end
+        fmsg("Не знаю: " .. table.concat(bad, ", ") .. ". Ключи: " .. table.concat(keys, " "))
+        return
+    end
+    sayA1(sel)
+end
+
+local function uiChk()
+    local t = { "{33CC33}Общая проверка (без должностей)" }
+    for _, r in ipairs(ROLES) do t[#t + 1] = "{FFFFFF}" .. r[2] end
+    uiShow(D_CHK, "FH | Проверка активности", table.concat(t, "\n"), "Проверить", "Закрыть", 2)
+end
+
+uiHandlers[D_CHK] = function(button, list)
+    if button == 0 then return end
+    local r = ROLES[list]
+    sayA1(r and { r[2] } or nil)
 end
 
 local function sayRules()
@@ -1158,7 +1203,7 @@ local function askVopros(p)
 end
 
 local INFO = {
-    a1 = sayA1, rules = sayRules, inf = sayInfo, time = sayTimeInfo, intro = sayGwIntro,
+    a1 = sayA1, a1args = sayA1Args, chk = uiChk, rules = sayRules, inf = sayInfo, time = sayTimeInfo, intro = sayGwIntro,
     capt = function() showRules("capt") end, biz = function() showRules("biz") end, q = askVopros,
 }
 local vrThread
@@ -1233,7 +1278,8 @@ local function registerExtra(reg)
     reg("vr", function() dvTimer(true) end)
     reg("dva", function() dvTimer(false) end)
     reg("dvs", function() dvTimer(true) end)
-    reg("a1", function() INFO.a1() end)
+    reg("a1", function(p) if (p or "") == "" then INFO.a1() else INFO.a1args(p) end end)
+    reg("chk", function(p) if (p or "") == "" then INFO.chk() else INFO.a1args(p) end end)
     reg("pravila", function() INFO.rules() end)
     reg("inf", function() INFO.inf() end)
     reg("timeinfo", function() INFO.time() end)
@@ -1378,7 +1424,7 @@ local MENU_ROWS = {
     { "/fr", "окно: набор, отбор, лидерка" },
     { "/nab /otb /otbo /tlead ключ", "набор /o, отбор /aad, отбор /o, лидерка" },
     { "#", "Объявления и памятки" },
-    { "/a1", "проверка активности следящих (ответ: 1)" },
+    { "/a1  /chk [ио зо gsg ...]", "проверка активности (ответ: 1), по должностям" },
     { "/pravila", "нормы онлайна и час пик лидерам в чат" },
     { "/inf  /timeinfo", "инфо для игроков и акция за онлайн в /aad" },
     { "/razdintro [приз]", "вступление перед раздачей в /aad" },
@@ -1477,7 +1523,7 @@ local function setupGui()
 
     local function getBuf(b) return fromUi(ffi.string(b)) end
     local function clearBuf(b) ffi.fill(b, ffi.sizeof(b), 0) end
-    local sel = { report = 0, fraction = 0, bind = "", note = 0 }
+    local sel = { report = 0, fraction = 0, bind = "", note = 0, roles = {} }
 
     local ucache = {}
     local function U(s)
@@ -1610,7 +1656,17 @@ local function setupGui()
     pages[11] = { "Памятки", function()
         title("Объявления и памятки")
         local bw = V2(fs * 14, fs * 2)
-        if imgui.Button(U("Проверка активности") .. "##i1", bw) then post(function() infoDo("a1") end) end
+        imgui.TextColored(YEL, U("Проверка активности: выберите должности"))
+        for i, r in ipairs(ROLES) do
+            if imgui.Selectable(U(r[2]) .. "##role" .. i, sel.roles[i] == true, 0, V2(fs * 6, fs * 1.4)) then sel.roles[i] = not sel.roles[i] end
+            if i % 5 ~= 0 and i < #ROLES then imgui.SameLine() end
+        end
+        if imgui.Button(U("Проверить выбранных") .. "##i1", bw) then
+            local names = {}
+            for i, r in ipairs(ROLES) do if sel.roles[i] then names[#names + 1] = r[2] end end
+            post(function() infoDo("a1", names) end)
+        end
+        imgui.Spacing()
         imgui.SameLine()
         if imgui.Button(U("Правила лидерам") .. "##i2", bw) then post(function() infoDo("rules") end) end
         if imgui.Button(U("Инфо игрокам") .. "##i3", bw) then post(function() infoDo("inf") end) end
