@@ -595,7 +595,9 @@ function AI.ask(system, user, cb)
                 if not okR then return 0, tostring(res) end
                 return res.status_code or 0, res.text or ""
             end)
-            local h = runner(trim(cfg.aiUrl), trim(cfg.aiKey), body)
+            local url = trim(cfg.aiUrl):gsub("/+$", "")
+            if url:match("/v1$") then url = url .. "/chat/completions" end   -- адрес вида .../v1 дополняем сами
+            local h = runner(url, trim(cfg.aiKey), body)
             local t0 = os.clock()
             while true do
                 local st = h:status()
