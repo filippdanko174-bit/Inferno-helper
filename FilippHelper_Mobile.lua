@@ -690,7 +690,7 @@ local CLAIM_COUNT = 3
 -- {ключ, текст после "z "}
 local CLAIMS = {
     { "ao", "aad otbor" }, { "oo", "o otbor" }, { "am", "aad mp" }, { "ar", "aad razdacha" },
-    { "sp", "spawn" }, { "on", "o nabor" }, { "aom", "aad otbor mp" }, { "oom", "o otbor mp" },
+    { "sp", "spawn" }, { "on", "o nabor" },
 }
 
 local function claim(text, count)
@@ -812,7 +812,7 @@ local function tryoutO(f)
         "/o [Отбор] Идёт отбор на пост лидера: " .. f[2] .. ".",
         "/o [Отбор] Нужно: 13+, связь ВК, знание " .. RULES_BY_KIND[f[4]] .. ".",
         "/o [Отбор] Желающие - пишите /gomp.",
-    }, 2500)
+    }, 2500, function() armAutoMp() end)
 end
 
 local function tempLeader(f) safeSend("/templeader " .. f[3]) end
