@@ -994,7 +994,7 @@ local ALIASES = {
     { "uw", "unwarn", "args" }, { "uj", "unjail", "args" }, { "unm", "unmute", "args" }, { "ub", "unban", "args" },
     { "ib", "iban", "args" }, { "ip", "pgetip", "args" }, { "bip", "banip", "args" },
     { "ofl", "offleader", "args" }, { "mkl", "makeleader", "args" },
-    { "fuel", "fuelcars", "none" }, { "gh", "ghetto", "none" }, { "gzc", "gzcolor", "args" },
+    { "fuel", "fuelcars", "none" }, { "fc", "fuelcars", "none" }, { "spc", "spawncars", "none" }, { "dva", "dvall", "none" }, { "gh", "ghetto", "none" }, { "gzc", "gzcolor", "args" },
     { "wh", "warehouse", "optargs" }, { "gs", "getstats", "idopt" }, { "inv", "checkinv", "idopt" },
     { "bp", "setbizprod", "args" },
 }
@@ -1097,6 +1097,11 @@ local function registerExtra(reg)
                 safeSend("/spawncars")
             end)
             vrThread = nil
+        end)
+    end)
+    reg("dvs", function()
+        lua_thread.create(function()
+            pcall(function() safeSend("/dvall") wait(1500) safeSend("/spawncars") end)
         end)
     end)
     reg("vrstop", function()
@@ -1230,7 +1235,8 @@ local MENU_ROWS = {
     { "/bb /uw /uj /unm /ub", "ban, unwarn, unjail, unmute, unban" },
     { "/ib /ip /bip /ofl /mkl", "iban, pgetip, banip, offleader, makeleader" },
     { "/gs /inv [ID]", "getstats, checkinv (ID или из /re)" },
-    { "/fuel /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
+    { "/fuel /fc /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
+    { "/spc /dva /dvs", "spawncars; dvall; dvall + spawncars сразу" },
     { "#", "Прочее" },
     { "/z [ключ]", "занять задачу: 3 раза «z ...» в /a (список: /z)" },
     { "/vr  /vrstop", "респавн транспорта через 15 сек / отмена" },
