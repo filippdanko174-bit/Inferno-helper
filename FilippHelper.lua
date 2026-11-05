@@ -1035,7 +1035,7 @@ end
 ----------------------------------------------------------------------
 local D_RULES = 4150
 
-local D_CHK = 4151
+local D_CHK, D_CHKRES = 4151, 4152
 local ROLES = {
     { "io", "ИО", "И.О. Основателя" }, { "zo", "ЗО", "Заместитель Основателя" }, { "po", "ПО", "Помощник Основателя" },
     { "ks", "КС", "Куратор сервера" }, { "zks", "ЗКС", "Заместитель Куратора сервера" },
@@ -1043,9 +1043,32 @@ local ROLES = {
     { "gsg", "ГС госс", "Главный следящий за госс. структурами" }, { "gsgh", "ГС гетто", "Главный следящий за гетто" },
     { "gsm", "ГС мафии", "Главный следящий за мафиями" },
 }
+-- быстрые наборы должностей
+local CHK_PRESETS = {
+    { "Руководство", { "io", "zo", "po", "ks", "zks" } },
+    { "ГА и ЗГА", { "ga", "zga" } },
+    { "Главные следящие", { "gsg", "gsgh", "gsm" } },
+    { "Все", { "io", "zo", "po", "ks", "zks", "ga", "zga", "gsg", "gsgh", "gsm" } },
+}
 
--- sel: список названий должностей; пусто - общая проверка
-local function sayA1(sel)
+-- ход проверки: кто ответил в /a
+local CHK = { active = false, list = {}, seen = {}, word = "1", t0 = 0, total = 0, secs = 0, thread = nil, token = 0 }
+
+local function chkNames(keys)
+    local out = {}
+    for _, k in ipairs(keys) do
+        for _, r in ipairs(ROLES) do if r[1] == k then out[#out + 1] = r[3] end end
+    end
+    return out
+end
+
+-- строки объявления в /a (sel - полные названия должностей, пусто - общая проверка)
+local function chkLines(sel, word, secs)
+    word = trim(word or "")
+    if word == "" then word = "1" end
+    secs = tonumber(secs) or 0
+    local answer = (word == "1") and "цифру 1" or ("слово «" .. word .. "»")
+    local tail = secs > 0 and (" Время: " .. math.floor(secs) .. " сек.") or ""
     local lines = { "/a Проверка активности администрации!" }
     if sel and #sel > 0 then
         for k = 1, #sel, 3 do
@@ -1053,12 +1076,72 @@ local function sayA1(sel)
             for m = k, math.min(k + 2, #sel) do part[#part + 1] = sel[m] end
             lines[#lines + 1] = "/a " .. (k == 1 and "Отзываются: " or "") .. table.concat(part, ", ") .. (k + 2 >= #sel and "." or ",")
         end
-        lines[#lines + 1] = "/a Поставьте свой тег и напишите в /a цифру 1."
+        lines[#lines + 1] = "/a Поставьте свой тег и напишите в /a " .. answer .. "." .. tail
     else
         lines[#lines + 1] = "/a Главные и заместители главных следящих - поставьте свой тег."
-        lines[#lines + 1] = "/a Подтвердите присутствие: напишите в /a цифру 1."
+        lines[#lines + 1] = "/a Подтвердите присутствие: напишите в /a " .. answer .. "." .. tail
     end
-    sendSeq(lines, SEND_GAP)
+    return lines, word, secs
+end
+
+local function chkResultText()
+    local t = { string.format("{FFFFFF}Отметились: {33CC33}%d", #CHK.list) }
+    t[#t + 1] = "{A9A9A9}Ответ: " .. CHK.word .. (CHK.active and "   (проверка идёт)" or "   (проверка закончена)")
+    t[#t + 1] = ""
+    if #CHK.list == 0 then t[#t + 1] = "{A9A9A9}Пока никто не ответил." end
+    for i, e in ipairs(CHK.list) do
+        t[#t + 1] = string.format("{FFFFFF}%d. %s{A9A9A9}%s  - через %d сек.", i, e.name, e.id and ("[" .. e.id .. "]") or "", e.sec)
+    end
+    return table.concat(t, "\n")
+end
+
+local function chkShow()
+    uiShow(D_CHKRES, "FH | Итог проверки активности", chkResultText(), "Закрыть", "", 0)
+end
+uiHandlers[D_CHKRES] = function() end
+
+-- конец проверки; announce - сообщить итог в /a
+local function chkEnd(announce)
+    if not CHK.active then fmsg("Проверка не запущена.") return end
+    CHK.active = false
+    CHK.token = CHK.token + 1
+    if CHK.thread then pcall(function() CHK.thread:terminate() end) CHK.thread = nil end
+    fmsg(string.format("Проверка закончена. Отметились: %d (список: /chkres).", #CHK.list))
+    if announce then safeSend(string.format("/a Проверка активности завершена. Отметились: %d.", #CHK.list)) end
+end
+
+-- вызывается для каждой строки чата: ищет ответы вида «Ник[ID]: 1»
+local function chkCollect(text)
+    if not CHK.active then return end
+    local clean = text:gsub("{%x%x%x%x%x%x}", ""):gsub("%c", "")
+    local name, id, msg = clean:match("([%w_%.]+)%[(%d+)%]%s*:%s*(.-)%s*$")
+    if not name then name, msg = clean:match("([%w_%.]+)%s*:%s*(.-)%s*$") end
+    if not name or lower1251(msg) ~= lower1251(CHK.word) then return end
+    if CHK.seen[name] then return end
+    CHK.seen[name] = true
+    CHK.list[#CHK.list + 1] = { name = name, id = id, sec = math.floor(os.clock() - CHK.t0) }
+end
+
+-- sel: список названий должностей; opts: { word = "1", seconds = 60 }
+local function sayA1(sel, opts)
+    opts = opts or {}
+    local lines, word, secs = chkLines(sel, opts.word, opts.seconds)
+    CHK.active, CHK.list, CHK.seen, CHK.word, CHK.secs = false, {}, {}, word, secs
+    if CHK.thread then pcall(function() CHK.thread:terminate() end) CHK.thread = nil end
+    CHK.token = CHK.token + 1
+    local my = CHK.token
+    sendSeq(lines, SEND_GAP, function()
+        if CHK.token ~= my then return end
+        CHK.active, CHK.t0 = true, os.clock()
+        if secs > 0 then
+            CHK.thread = lua_thread.create(function()
+                wait(secs * 1000)
+                if CHK.token == my and CHK.active then
+                    pcall(function() chkEnd(false) chkShow() end)
+                end
+            end)
+        end
+    end)
 end
 
 local function roleByToken(tok)
@@ -1068,30 +1151,41 @@ local function roleByToken(tok)
     end
 end
 
+-- /a1 [должности] [t=секунд] [w=слово]
 local function sayA1Args(p)
-    local sel, bad = {}, {}
+    local sel, bad, opts = {}, {}, {}
     for tok in (p or ""):gmatch("[^%s,]+") do
-        local r = roleByToken(tok)
-        if r then sel[#sel + 1] = r else bad[#bad + 1] = tok end
+        local secs = tok:match("^t=(%d+)$")
+        local word = tok:match("^w=(.+)$")
+        if secs then opts.seconds = tonumber(secs)
+        elseif word then opts.word = word
+        else
+            local r = roleByToken(tok)
+            if r then sel[#sel + 1] = r else bad[#bad + 1] = tok end
+        end
     end
     if #bad > 0 then
         local keys = {}
         for _, r in ipairs(ROLES) do keys[#keys + 1] = r[1] end
-        fmsg("Не знаю: " .. table.concat(bad, ", ") .. ". Ключи: " .. table.concat(keys, " "))
+        fmsg("Не знаю: " .. table.concat(bad, ", ") .. ". Ключи: " .. table.concat(keys, " ") .. " | t=60 w=слово")
         return
     end
-    sayA1(sel)
+    sayA1(sel, opts)
 end
 
 local function uiChk()
     local t = { "{33CC33}Общая проверка (без должностей)" }
+    for _, p in ipairs(CHK_PRESETS) do t[#t + 1] = "{66CCFF}Набор: {FFFFFF}" .. p[1] end
     for _, r in ipairs(ROLES) do t[#t + 1] = "{FFFFFF}" .. r[2] end
     uiShow(D_CHK, "FH | Проверка активности", table.concat(t, "\n"), "Проверить", "Закрыть", 2)
 end
 
 uiHandlers[D_CHK] = function(button, list)
     if button == 0 then return end
-    local r = ROLES[list]
+    if list == 0 then sayA1(nil) return end
+    local p = CHK_PRESETS[list]
+    if p then sayA1(chkNames(p[2])) return end
+    local r = ROLES[list - #CHK_PRESETS]
     sayA1(r and { r[3] } or nil)
 end
 
@@ -1210,7 +1304,7 @@ local function askVopros(p)
 end
 
 local INFO = {
-    a1 = sayA1, a1args = sayA1Args, chk = uiChk, rules = sayRules, inf = sayInfo, time = sayTimeInfo, intro = sayGwIntro,
+    a1 = sayA1, a1args = sayA1Args, chk = uiChk, chkres = chkShow, chkend = function() chkEnd(true) end, chkfin = function() chkEnd(false) end, rules = sayRules, inf = sayInfo, time = sayTimeInfo, intro = sayGwIntro,
     capt = function() showRules("capt") end, biz = function() showRules("biz") end, q = askVopros,
 }
 local vrThread
@@ -1285,6 +1379,8 @@ local function registerExtra(reg)
     reg("vr", function() dvTimer(true) end)
     reg("dva", function() dvTimer(false) end)
     reg("dvs", function() dvTimer(true) end)
+    reg("chkres", function() INFO.chkres() end)
+    reg("chkend", function() INFO.chkend() end)
     reg("a1", function(p) if (p or "") == "" then INFO.a1() else INFO.a1args(p) end end)
     reg("chk", function(p) if (p or "") == "" then INFO.chk() else INFO.a1args(p) end end)
     reg("pravila", function() INFO.rules() end)
@@ -1431,7 +1527,8 @@ local MENU_ROWS = {
     { "/fr", "окно: набор, отбор, лидерка" },
     { "/nab /otb /otbo /tlead ключ", "набор /o, отбор /aad, отбор /o, лидерка" },
     { "#", "Объявления и памятки" },
-    { "/a1  /chk [ио зо gsg ...]", "проверка активности (ответ: 1), по должностям" },
+    { "/a1  /chk [ио зо gsg t=60 w=слово]", "проверка активности по должностям, таймер и слово ответа" },
+    { "/chkres  /chkend", "кто отметился; закончить и объявить итог в /a" },
     { "/pravila", "нормы онлайна и час пик лидерам в чат" },
     { "/inf  /timeinfo", "инфо для игроков и акция за онлайн в /aad" },
     { "/razdintro [приз]", "вступление перед раздачей в /aad" },
@@ -1507,7 +1604,7 @@ local function setupGui()
     end
     if not fontPath then return nil end
 
-    local G = { show = imgui.new.bool(false), page = 1, errors = 0, disabled = false, initFailed = false, fs = fs }
+    local G = { show = imgui.new.bool(false), page = 12, errors = 0, disabled = false, initFailed = false, fs = fs }
     local ACC = imgui.ImVec4(cfg.accent[1], cfg.accent[2], cfg.accent[3], 1)
     local YEL = imgui.ImVec4(1, 0.85, 0.35, 1)
     local GRAY = imgui.ImVec4(0.62, 0.65, 0.70, 1)
@@ -1519,7 +1616,7 @@ local function setupGui()
     local function buf(n) return imgui.new.char[n]() end
     local B = {
         gwWord = buf(64), gwPrize = buf(96), reply = buf(512), evId = buf(12),
-        bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160), claim = buf(64), evPrize = buf(96),
+        bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160), claim = buf(64), evPrize = buf(96), chkWord = buf(24), chkSecs = buf(8), search = buf(48),
     }
     local accBuf = imgui.new.float[3](cfg.accent[1], cfg.accent[2], cfg.accent[3])
     local bgBuf = imgui.new.float[3](cfg.bg[1], cfg.bg[2], cfg.bg[3])
@@ -1548,10 +1645,16 @@ local function setupGui()
 
     pages[1] = { "Команды", function()
         title("Все команды")
+        imgui.Text(U("Поиск")) imgui.SameLine()
+        imgui.PushItemWidth(fs * 16) imgui.InputText("##cmdsearch", B.search, 40) imgui.PopItemWidth()
+        local q = lower1251(trim(getBuf(B.search)))
+        local head
         for _, r in ipairs(MENU_ROWS) do
             if r[1] == "#" then
-                imgui.Spacing() imgui.TextColored(ACC, U(r[2]))
-            else
+                head = r[2]
+                if q == "" then imgui.Spacing() imgui.TextColored(ACC, U(r[2])) head = nil end
+            elseif q == "" or lower1251(r[1]):find(q, 1, true) or lower1251(r[2]):find(q, 1, true) then
+                if head then imgui.Spacing() imgui.TextColored(ACC, U(head)) head = nil end
                 imgui.TextColored(YEL, U(r[1])) imgui.SameLine(fs * 15) imgui.TextWrapped(U(r[2]))
             end
         end
@@ -1658,6 +1761,90 @@ local function setupGui()
         imgui.Spacing()
         hint("Удаление админ-каров: сначала предупреждение в /a, через 15 секунд /dvall.")
         if imgui.Button(U("Отменить удаление") .. "##cvs", bw) then post(function() pcall(sampProcessChatInput, "/vrstop") end) end
+    end }
+
+    local function selNames()
+        local names = {}
+        for i, r in ipairs(ROLES) do if sel.roles[i] then names[#names + 1] = r[3] end end
+        return names
+    end
+
+    pages[12] = { "Главная", function()
+        title("Главная")
+        local active = CHK and CHK.active
+        imgui.TextColored(GRAY, U("ID из /re: " .. tostring(watchedId or "-") .. "   |   Репортов в списке: " .. #reports ..
+            "   |   Авто-/mp: " .. (cfg.automp and "вкл" or "выкл")))
+        if active then imgui.TextColored(GREEN, U("Идёт проверка активности. Отметились: " .. #CHK.list)) end
+        imgui.Spacing()
+        imgui.TextColored(YEL, U("Быстрые действия"))
+        local bw = V2(fs * 12.5, fs * 2.4)
+        local function btn(label, id, fn, same)
+            if imgui.Button(U(label) .. "##h" .. id, bw) then post(fn) end
+            if same then imgui.SameLine() end
+        end
+        btn("Проверка активности", 1, function() INFO.a1(selNames()) end, true)
+        btn("Список репортов", 2, function() G.page = 3 end, true)
+        btn("Раздача призов", 3, function() G.page = 2 end, false)
+        btn("Заправить кары", 4, function() carsDo("fuel") end, true)
+        btn("Заспавнить кары", 5, function() carsDo("spawn") end, true)
+        btn("Удалить адм-кары (15 с)", 6, function() carsDo("dv") end, false)
+        btn("Нажать /mp", 7, function() armAutoMp(true) end, true)
+        btn("Правила лидерам", 8, function() INFO.rules() end, true)
+        btn("Инфо игрокам", 9, function() INFO.inf() end, false)
+        imgui.Spacing()
+        hint("Остальное - в меню слева. Все команды и поиск по ним: страница «Команды».")
+    end }
+
+    pages[13] = { "Проверка", function()
+        title("Проверка активности")
+        hint("Выберите должности или набор. Если никого не выбрать - общая проверка.")
+        for i, p in ipairs(CHK_PRESETS) do
+            if imgui.Button(U(p[1]) .. "##pre" .. i, V2(fs * 9, fs * 1.8)) then
+                sel.roles = {}
+                for _, k in ipairs(p[2]) do
+                    for ri, r in ipairs(ROLES) do if r[1] == k then sel.roles[ri] = true end end
+                end
+            end
+            imgui.SameLine()
+        end
+        if imgui.Button(U("Сбросить") .. "##prer", V2(fs * 7, fs * 1.8)) then sel.roles = {} end
+        imgui.Spacing()
+        for i, r in ipairs(ROLES) do
+            if imgui.Selectable(U(r[2]) .. "##crole" .. i, sel.roles[i] == true, 0, V2(fs * 6, fs * 1.4)) then sel.roles[i] = not sel.roles[i] end
+            if i % 5 ~= 0 and i < #ROLES then imgui.SameLine() end
+        end
+        imgui.Spacing()
+        imgui.Text(U("Ответ")) imgui.SameLine()
+        imgui.PushItemWidth(fs * 6) imgui.InputText("##chkword", B.chkWord, 20) imgui.PopItemWidth()
+        imgui.SameLine() imgui.Text(U("Секунд")) imgui.SameLine()
+        imgui.PushItemWidth(fs * 4) imgui.InputText("##chksecs", B.chkSecs, 6) imgui.PopItemWidth()
+        imgui.SameLine() hint("(0 - без таймера)")
+        local word = trim(getBuf(B.chkWord))
+        local secs = tonumber(getBuf(B.chkSecs)) or 0
+        imgui.Spacing()
+        imgui.TextColored(YEL, U("Что уйдёт в /a:"))
+        local lines = chkLines(selNames(), word, secs)
+        for _, l in ipairs(lines) do imgui.TextWrapped(U(l)) end
+        imgui.Spacing()
+        local bw = V2(fs * 11, fs * 2.2)
+        if imgui.Button(U("Начать проверку") .. "##chkgo", bw) then
+            local names = selNames()
+            post(function() sayA1(names, { word = word, seconds = secs }) end)
+        end
+        imgui.SameLine()
+        if imgui.Button(U("Завершить и объявить") .. "##chkfin", bw) then post(function() chkEnd(true) end) end
+        imgui.SameLine()
+        if imgui.Button(U("Итог окном") .. "##chkres", bw) then post(chkShow) end
+        imgui.Spacing()
+        if CHK.active then imgui.TextColored(GREEN, U("Идёт проверка. Отметились: " .. #CHK.list))
+        else imgui.TextColored(GRAY, U("Проверка не идёт. Последний результат: " .. #CHK.list)) end
+        imgui.BeginChild("##chkans", V2(0, fs * 7), true)
+        if #CHK.list == 0 then hint("Пока никто не ответил.") end
+        for i, e in ipairs(CHK.list) do
+            imgui.Text(U(i .. ". " .. e.name .. (e.id and ("[" .. e.id .. "]") or "")))
+            imgui.SameLine(fs * 16) imgui.TextColored(GRAY, U("через " .. e.sec .. " сек."))
+        end
+        imgui.EndChild()
     end }
 
     pages[11] = { "Памятки", function()
@@ -1874,20 +2061,37 @@ local function setupGui()
             imgui.TextColored(ACC, U("FilippHelper"))
             imgui.TextColored(GRAY, U("v" .. VERSION))
             imgui.Separator() imgui.Spacing()
-            -- порядок кнопок: настройки всегда в самом низу
-            local order, settingsIdx = {}, #pages
-            for i, p in ipairs(pages) do if p[1] == "Настройки" then settingsIdx = i else order[#order + 1] = i end end
-            order[#order + 1] = settingsIdx
-            for _, i in ipairs(order) do
+            -- группы меню; настройки всегда в самом низу
+            local groups = {
+                { "ГЛАВНОЕ", { "Главная", "Проверка", "Репорты", "Раздачи", "Мероприятия" } },
+                { "АДМИНИСТРИРОВАНИЕ", { "Фракции", "Транспорт", "Памятки", "Занять" } },
+                { "ИНСТРУМЕНТЫ", { "Биндер", "Шпаргалки", "Команды" } },
+            }
+            local byName, used = {}, {}
+            for i, p in ipairs(pages) do byName[p[1]] = i end
+            local function drawBtn(i)
                 local p = pages[i]
-                if i == settingsIdx then imgui.Separator() imgui.Spacing() end
+                used[i] = true
                 local active = G.page == i
                 if active then imgui.PushStyleColor(imgui.Col.Button, ACC) end
-                local clicked = imgui.Button(U(p[1]) .. "##p" .. i, V2(-1, fs * 2.2))
+                local clicked = imgui.Button(U(p[1]) .. "##p" .. i, V2(-1, fs * 2.1))
                 if active then imgui.PopStyleColor() end
                 if clicked then G.page = i end
-                imgui.Spacing()
             end
+            for gi, g in ipairs(groups) do
+                imgui.Spacing() imgui.TextColored(GRAY, U(g[1]))
+                for _, name in ipairs(g[2]) do
+                    local i = byName[name]
+                    if i then drawBtn(i) end
+                end
+                if gi == #groups then
+                    for i, p in ipairs(pages) do   -- страницы, которых нет в группах
+                        if not used[i] and p[1] ~= "Настройки" then drawBtn(i) end
+                    end
+                end
+            end
+            local si = byName["Настройки"]
+            if si then imgui.Separator() imgui.Spacing() drawBtn(si) end
         end)
         imgui.EndChild()
         imgui.SameLine()
@@ -1975,7 +2179,7 @@ local function setupGui()
 
     imgui.OnFrame(function() return G.show[0] and not G.disabled and not G.initFailed end, function(self)
         self.HideCursor = false
-        imgui.SetNextWindowSize(V2(fs * 46, fs * 28), imgui.Cond.FirstUseEver)
+        imgui.SetNextWindowSize(V2(fs * 50, fs * 30), imgui.Cond.FirstUseEver)
         imgui.SetNextWindowPos(V2(sw / 2, sh / 2), imgui.Cond.FirstUseEver, V2(0.5, 0.5))
         if imgui.Begin("FilippHelper##fh", G.show, imgui.WindowFlags.NoCollapse) then
             drawGlass()
@@ -1998,6 +2202,7 @@ if okG then guiState = gs else print("[FH] gui setup error: " .. tostring(gs)) e
 local function onServerMessageImpl(color, text)
     if type(text) ~= "string" then return end
     text = fromGame(text)
+    pcall(chkCollect, text)
     if not text:find("Репорт", 1, true) then return end
 
     local clean = text:gsub("{%x%x%x%x%x%x}", ""):gsub("%c", "")
