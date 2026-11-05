@@ -1031,6 +1031,137 @@ local function cmdAr(id)
     }, SEND_GAP)
 end
 
+----------------------------------------------------------------------
+-- ОБЪЯВЛЕНИЯ, ПАМЯТКИ И ПРОВЕРКИ
+----------------------------------------------------------------------
+local D_RULES = 4150
+
+local function sayA1()
+    sendSeq({
+        "/a Проверка активности следящей администрации!",
+        "/a Главные и заместители главных следящих - поставьте свой тег.",
+        "/a Подтвердите присутствие: напишите в /a цифру 1.",
+    }, SEND_GAP)
+end
+
+local function sayRules()
+    sendSeq({
+        "Норма онлайна лидера: в будни 1 час, в выходные 1 час 30 минут.",
+        "Не отыграли норму - получаете выговор.",
+        "3/3 выговоров - снятие с поста лидера и ЧСЛ.",
+        "Час пик в будни: с 17:00 до 20:00.",
+        "Час пик в выходные: с 16:00 до 19:00.",
+        "Отсутствие в час пик тоже карается выговором.",
+        "Вопросы - к следящим вашей структуры.",
+    }, 3500)
+end
+
+local function sayInfo()
+    sendSeq({
+        "/aad [INFO] Уважаемые игроки, администрация всегда на связи!",
+        "/aad [INFO] Нашли баг или нарушение - пишите в /rep.",
+        "/aad [INFO] Формулируйте вопрос или жалобу коротко и понятно.",
+        "/aad [INFO] За флуд, оффтоп и оскорбления в репорте выдаётся наказание.",
+        "/aad [INFO] Приятной игры!",
+    }, SEND_GAP)
+end
+
+local function sayTimeInfo()
+    sendSeq({
+        "/aad [INFO] Игроки, напоминаем об акции за онлайн!",
+        "/aad [INFO] Отыграйте час на сервере и получите приз.",
+        "/aad [INFO] Награду можно получать до 5 раз в день.",
+        "/aad [INFO] Проверить время и забрать приз: /rep time",
+        "/aad [INFO] С уважением, администрация проекта.",
+    }, SEND_GAP)
+end
+
+local function sayGwIntro(prize)
+    prize = trim(prize or "")
+    local lines = {
+        "/aad [Раздача] Внимание, игроки! Сейчас пройдёт быстрая раздача призов.",
+        "/aad [Раздача] Приготовьтесь писать кодовое слово в чат!",
+    }
+    if prize ~= "" then lines[#lines + 1] = "/aad [Раздача] Приз: " .. prize .. "." end
+    sendSeq(lines, SEND_GAP)
+end
+
+local RULES_TEXT = {
+    capt = {
+        "FH | Правила каптов",
+        "{66CCFF}Разрешено\n" ..
+        "{FFFFFF}- слайды, полуслайды, +C, сбив переката\n" ..
+        "- крыши, на которые попадают в 2 прыжка или по лестнице\n" ..
+        "- слив вне квадрата после 5 минут капта\n" ..
+        "- капт куском или обрезом, машины для баррикад\n\n" ..
+        "{FF6666}Нельзя (1/3, спавн, джейл или варн)\n" ..
+        "{FFFFFF}- убийство или запрет входа в квадрат до 5 минут\n" ..
+        "- крыши выше 2 прыжков\n" ..
+        "- заходить в интерьер в бою, СК в интерьере банды\n" ..
+        "- обстрел респавна соперника\n" ..
+        "- маска, броня, аптечки, наркотики в бою\n" ..
+        "- чужой скин, если клист банды не совпадает со скином фракции\n\n" ..
+        "{FF6666}Тяжёлые нарушения\n" ..
+        "{FFFFFF}- ДНК, джетпак, дом на колёсах в квадрате: 1/3\n" ..
+        "- антифраг (суицид, релог, подстав под госников): 1/3\n" ..
+        "- отказ дать опру следящим или скрытие читов: варн и минус квадрат\n" ..
+        "- багоюз Double Kill, стрельба по колёсам: 2/3\n" ..
+        "- провокация на слив или СК у респавна: джейл 10 минут\n\n" ..
+        "{FFCC00}Лидерам банд\n" ..
+        "{FFFFFF}- в капте 1-3 ранги фракции или помеха третьей банды: 1/3 лидеру\n" ..
+        "- капт респы любой банды: выговор, отмена капта, минус 3 квадрата\n" ..
+        "- игнор капта или неприезд состава на забив: 1/3 лидеру",
+    },
+    biz = {
+        "FH | Правила бизваров",
+        "{66CCFF}Общее\n" ..
+        "{FFFFFF}- забивать стрелу могут только лидер или заместитель, за 30+ минут через ВК\n" ..
+        "- время стрел: с 12:00 до 22:00 по Москве, минимум 2 на 2\n" ..
+        "- длительность 10 минут, нужна опра от лидера и зама, если нет следящих\n" ..
+        "- 3/3 у мафии: фракция теряет 1 бизнес\n\n" ..
+        "{FF6666}Нельзя (1/3)\n" ..
+        "{FFFFFF}- крыши и горы, стрельба по машине при въезде врага\n" ..
+        "- тянуть время вне квадрата, кататься в квадрате на машине дольше 10 секунд (1/3 и спавн)\n" ..
+        "- чужой скин, помощь посторонних (мафии сразу 3/3)\n" ..
+        "- АФК больше 30 секунд, вертолёт или личный транспорт, не впускать врага в квадрат\n" ..
+        "- выход из квадрата, маска, броня, оружие кроме Desert Eagle, M4, Shotgun, Rifle\n" ..
+        "- SK, DB, TK, слив или стрельба вне квадрата, игнор стрелы и следящих\n" ..
+        "- антифраг: прыжок с моста или горы, суицид\n\n" ..
+        "{FF6666}Тяжёлые нарушения\n" ..
+        "{FFFFFF}- баги, сбив анимаций в бою: 2/3\n" ..
+        "- стрельба с пассажирского сиденья: 1/3 и джейл 10 минут\n" ..
+        "- стрела вне 12:00-22:00: остановка стрелы и выговор лидеру",
+    },
+}
+
+local function showRules(kind)
+    local r = RULES_TEXT[kind]
+    if r then uiShow(D_RULES, r[1], r[2], "Закрыть", "", 0) end
+end
+uiHandlers[D_RULES] = function() end
+
+local VOPROS = {
+    { "Что такое ЧП?", "ЧП - час пик, обязательное время онлайна лидеров." },
+    { "Какая норма онлайна у лидера в будни?", "В будни норма - 1 час." },
+    { "Какая норма онлайна у лидера в выходные?", "В выходные норма - 1 час 30 минут." },
+    { "Что обязан делать лидер фракции?", "Следить за фракцией, форумом и составом." },
+    { "Что такое блат?", "Блат - выдача высокой должности без отчётов и обзвона." },
+    { "Со скольки до скольки ЧП в будни?", "В будни ЧП с 17:00 до 20:00." },
+    { "Со скольки до скольки ЧП в выходные?", "В выходные ЧП с 16:00 до 19:00." },
+}
+
+local function askVopros(p)
+    local n = tonumber((p or ""):match("^%d+"))
+    local v = n and VOPROS[n]
+    if not v then fmsg("Использование: /vopros 1-" .. #VOPROS .. " (вопрос лидеру в чат, ответ покажу вам).") return end
+    safeSend(v[1])
+    fmsg("Ответ: " .. v[2])
+end
+
+local INFO = {
+    a1 = sayA1, rules = sayRules, inf = sayInfo, time = sayTimeInfo, intro = sayGwIntro,
+    capt = function() showRules("capt") end, biz = function() showRules("biz") end, q = askVopros,
+}
 local vrThread
 -- удаление админ-каров всегда с предупреждением в /a и таймером 15 с
 local function dvTimer(spawn)
@@ -1103,6 +1234,14 @@ local function registerExtra(reg)
     reg("vr", function() dvTimer(true) end)
     reg("dva", function() dvTimer(false) end)
     reg("dvs", function() dvTimer(true) end)
+    reg("a1", function() INFO.a1() end)
+    reg("pravila", function() INFO.rules() end)
+    reg("inf", function() INFO.inf() end)
+    reg("timeinfo", function() INFO.time() end)
+    reg("razdintro", function(p) INFO.intro(p) end)
+    reg("captlist", function() INFO.capt() end)
+    reg("bizwarlist", function() INFO.biz() end)
+    reg("vopros", function(p) INFO.q(p) end)
     reg("vrstop", function()
         if vrThread then
             pcall(function() vrThread:terminate() end)
@@ -1221,6 +1360,8 @@ local function carsDo(kind)
     end
 end
 
+local function infoDo(kind, arg) local f = INFO[kind] if f then f(arg) end end
+
 local MENU_ROWS = {
     { "#", "Раздачи" },
     { "/gw слово | приз", "запустить раздачу (банк 500000, лвл 3, #9 15)" },
@@ -1237,6 +1378,13 @@ local MENU_ROWS = {
     { "#", "Фракции" },
     { "/fr", "окно: набор, отбор, лидерка" },
     { "/nab /otb /otbo /tlead ключ", "набор /o, отбор /aad, отбор /o, лидерка" },
+    { "#", "Объявления и памятки" },
+    { "/a1", "проверка активности следящих (ответ: 1)" },
+    { "/pravila", "нормы онлайна и час пик лидерам в чат" },
+    { "/inf  /timeinfo", "инфо для игроков и акция за онлайн в /aad" },
+    { "/razdintro [приз]", "вступление перед раздачей в /aad" },
+    { "/captlist  /bizwarlist", "памятки по правилам каптов и бизваров" },
+    { "/vopros 1-7", "вопрос лидеру в чат, ответ покажет вам" },
     { "#", "Наказания" },
     { "/jj /mut /ww [ID]", "jail, mute, warn - вставят команду в ввод" },
     { "/bb /uw /uj /unm /ub", "ban, unwarn, unjail, unmute, unban" },
@@ -1458,6 +1606,30 @@ local function setupGui()
         imgui.Spacing()
         hint("Удаление админ-каров: сначала предупреждение в /a, через 15 секунд /dvall.")
         if imgui.Button(U("Отменить удаление") .. "##cvs", bw) then post(function() pcall(sampProcessChatInput, "/vrstop") end) end
+    end }
+
+    pages[11] = { "Памятки", function()
+        title("Объявления и памятки")
+        local bw = V2(fs * 14, fs * 2)
+        if imgui.Button(U("Проверка активности") .. "##i1", bw) then post(function() infoDo("a1") end) end
+        imgui.SameLine()
+        if imgui.Button(U("Правила лидерам") .. "##i2", bw) then post(function() infoDo("rules") end) end
+        if imgui.Button(U("Инфо игрокам") .. "##i3", bw) then post(function() infoDo("inf") end) end
+        imgui.SameLine()
+        if imgui.Button(U("Акция за онлайн") .. "##i4", bw) then post(function() infoDo("time") end) end
+        if imgui.Button(U("Вступление к раздаче") .. "##i5", bw) then post(function() infoDo("intro", getBuf(B.gwPrize)) end) end
+        imgui.SameLine()
+        hint("Приз берётся из поля раздач.")
+        imgui.Spacing()
+        if imgui.Button(U("Правила каптов") .. "##i6", bw) then post(function() infoDo("capt") end) end
+        imgui.SameLine()
+        if imgui.Button(U("Правила бизваров") .. "##i7", bw) then post(function() infoDo("biz") end) end
+        imgui.Spacing()
+        hint("Вопрос лидеру в чат (ответ в чате только вам):")
+        for i, v in ipairs(VOPROS) do
+            if imgui.Button(tostring(i) .. "##q" .. i, V2(fs * 3, fs * 2)) then post(function() infoDo("q", tostring(i)) end) end
+            if i < #VOPROS then imgui.SameLine() end
+        end
     end }
 
     pages[5] = { "Фракции", function()
