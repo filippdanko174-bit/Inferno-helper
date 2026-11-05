@@ -4,6 +4,15 @@ local okEv, ev = pcall(require, 'samp.events')
 if not okEv then ev = require 'lib.samp.events' end
 
 -- @ENC-BEGIN (на ПК файл уже в cp1251, перекодировка не нужна)
+local encOk, encoding = pcall(require, 'encoding')
+local enc8
+if encOk and encoding then
+    encoding.default = 'CP1251'
+    enc8 = encoding.UTF8
+end
+local GUI_ENCODING_OK = enc8 ~= nil                                     -- для окна mimgui нужна перекодировка в UTF-8
+local function toUi(s) if enc8 then return enc8:encode(s) end return s end    -- cp1251 -> UTF-8
+local function fromUi(s) if enc8 then return enc8:decode(s) end return s end  -- UTF-8 -> cp1251
 local function toGame(s) return s end     -- строка скрипта -> игра
 local function fromGame(s) return s end   -- игра -> строка скрипта
 -- @ENC-END
@@ -805,6 +814,20 @@ local function regAlias(reg, a)
     end)
 end
 
+local function cmdAr(id)
+    if not id then fmsg("Использование: /ar ID") return end
+    local text
+    local name = "ID " .. id
+    for _, r in ipairs(reports) do
+        if r.id == id then text = r.text name = r.name .. "[" .. id .. "]" break end
+    end
+    sendSeq({
+        string.format("/pm %s Здравствуйте, ваша жалоба принята, передаю её администрации.", id),
+        "/a Коллеги, отвечаем на репорт!",
+        string.format("/a %s | Жалоба: %s", name, text or "текст не найден, смотрите /report"),
+    }, SEND_GAP)
+end
+
 local vrThread
 local function registerExtra(reg)
     reg("ev", function(p)
@@ -850,19 +873,7 @@ local function registerExtra(reg)
         }, SEND_GAP)
     end)
 
-    reg("ar", function(p)
-        local id = p:match("^(%d+)") or watchedId
-        if not id then fmsg("Использование: /ar ID") return end
-        local text
-        for _, r in ipairs(reports) do if r.id == id then text = r.text break end end
-        local name = "ID " .. id
-        for _, r in ipairs(reports) do if r.id == id then name = r.name .. "[" .. id .. "]" break end end
-        sendSeq({
-            string.format("/pm %s Здравствуйте, ваша жалоба принята, передаю её администрации.", id),
-            "/a Коллеги, отвечаем на репорт!",
-            string.format("/a %s | Жалоба: %s", name, text or "текст не найден, смотрите /report"),
-        }, SEND_GAP)
-    end)
+    reg("ar", function(p) cmdAr(p:match("^(%d+)") or watchedId) end)
 
     reg("vr", function()
         if vrThread then fmsg("Таймер уже идёт (остановить: /vrstop).") return end
@@ -997,6 +1008,320 @@ end
 uiHandlers[D_MENU] = function() end
 
 ----------------------------------------------------------------------
+-- ОКНО MIMGUI: /fh -- меню слева, страницы справа
+-- Если mimgui/шрифт с кириллицей недоступны, /fh откроет обычное диалоговое окно.
+----------------------------------------------------------------------
+local postedActions = {}
+local function post(fn) postedActions[#postedActions + 1] = fn end
+local function runPosted()
+    while #postedActions > 0 do
+        local fn = table.remove(postedActions, 1)
+        local ok, err = pcall(fn)
+        if not ok then print("[FH] gui action error: " .. tostring(err)) end
+    end
+end
+
+local guiState   -- заполняется в setupGui; nil, если окно недоступно
+
+local function setupGui()
+    if not GUI_ENCODING_OK then return nil end
+    local okI, imgui = pcall(require, 'mimgui')
+    if not okI or type(imgui) ~= "table" then return nil end
+    local okF, ffi = pcall(require, 'ffi')
+    if not okF then return nil end
+
+    -- размер экрана и шрифт
+    local sw, sh = 1280, 720
+    pcall(function() sw, sh = getScreenResolution() end)
+    local fs = math.max(14, math.min(26, math.floor(sh / 55)))
+
+    local fontPath
+    local candidates = {}
+    local okD, dir = pcall(getFolderPath, 0x14)
+    if okD and type(dir) == "string" then
+        for _, n in ipairs({ "arial.ttf", "segoeui.ttf", "tahoma.ttf", "arialbd.ttf" }) do candidates[#candidates + 1] = dir .. "\\" .. n end
+    end
+    for _, p in ipairs({ "/system/fonts/Roboto-Regular.ttf", "/system/fonts/NotoSans-Regular.ttf", "/system/fonts/DroidSans.ttf" }) do
+        candidates[#candidates + 1] = p
+    end
+    for _, p in ipairs(candidates) do
+        local f = io.open(p, "rb")
+        if f then f:close() fontPath = p break end
+    end
+    if not fontPath then return nil end
+
+    local G = { show = imgui.new.bool(false), page = 1, errors = 0, disabled = false, initFailed = false, fs = fs }
+    local ACC = imgui.ImVec4(0.26, 0.62, 0.96, 1)
+    local YEL = imgui.ImVec4(1, 0.85, 0.35, 1)
+    local GRAY = imgui.ImVec4(0.62, 0.65, 0.70, 1)
+    local GREEN = imgui.ImVec4(0.40, 0.85, 0.50, 1)
+    local RED = imgui.ImVec4(0.95, 0.40, 0.40, 1)
+    local V2 = imgui.ImVec2
+
+    -- буферы ввода
+    local function buf(n) return imgui.new.char[n]() end
+    local B = {
+        gwWord = buf(64), gwPrize = buf(96), reply = buf(160), evId = buf(12),
+        bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256),
+    }
+    local function getBuf(b) return fromUi(ffi.string(b)) end
+    local function clearBuf(b) ffi.fill(b, ffi.sizeof(b), 0) end
+    local sel = { report = 0, fraction = 0, bind = "", note = 0 }
+
+    local ucache = {}
+    local function U(s)
+        local c = ucache[s]
+        if not c then c = toUi(s) ucache[s] = c end
+        return c
+    end
+    local function title(s) imgui.TextColored(ACC, U(s)) imgui.Separator() imgui.Spacing() end
+    local function hint(s) imgui.TextColored(GRAY, U(s)) end
+
+    ------------------------------------------------------------------
+    -- страницы
+    ------------------------------------------------------------------
+    local pages = {}
+
+    pages[1] = { "Команды", function()
+        title("Все команды")
+        for _, r in ipairs(MENU_ROWS) do
+            if r[1] == "#" then
+                imgui.Spacing() imgui.TextColored(ACC, U(r[2]))
+            else
+                imgui.TextColored(YEL, U(r[1])) imgui.SameLine(fs * 15) imgui.TextWrapped(U(r[2]))
+            end
+        end
+    end }
+
+    pages[2] = { "Раздачи", function()
+        title("Раздача призов")
+        imgui.Text(U("Кодовое слово")) imgui.PushItemWidth(-1) imgui.InputText("##gwword", B.gwWord, 64) imgui.PopItemWidth()
+        imgui.Text(U("Приз")) imgui.PushItemWidth(-1) imgui.InputText("##gwprize", B.gwPrize, 96) imgui.PopItemWidth()
+        hint("Формат приза: тип и число. Например: банк 500000, лвл 3, #9 15 (номер статы).")
+        imgui.Spacing()
+        local function start(isLast)
+            local w, p = getBuf(B.gwWord), getBuf(B.gwPrize)
+            post(function() gwStart(w .. " | " .. p, isLast) end)
+        end
+        if imgui.Button(U("Старт"), V2(fs * 7, fs * 2)) then start(false) end
+        imgui.SameLine()
+        if imgui.Button(U("Финальный раунд"), V2(fs * 10, fs * 2)) then start(true) end
+        imgui.SameLine()
+        if imgui.Button(U("Стоп"), V2(fs * 6, fs * 2)) then post(function() gw.active = false gw.last = false fmsg("Раздача отменена.") end) end
+        imgui.Spacing() imgui.Separator() imgui.Spacing()
+        if gw.active then
+            imgui.TextColored(GREEN, U("Идёт раздача"))
+            imgui.Text(U("Слово: " .. gw.word))
+            imgui.Text(U("Приз: " .. gw.prize))
+            if not gw.stat then imgui.TextColored(RED, U("Тип приза не распознан - выдавать вручную.")) end
+        else
+            imgui.TextColored(GRAY, U("Раздача не запущена."))
+        end
+    end }
+
+    pages[3] = { "Репорты", function()
+        title("Последние репорты")
+        if #reports == 0 then hint("Репортов пока нет.") return end
+        imgui.BeginChild("##replist", V2(0, fs * 11), true)
+        for i, r in ipairs(reports) do
+            if imgui.Selectable(toUi(string.format("[%s] %s: %s", r.id, r.name, r.text)) .. "##r" .. i, sel.report == i) then sel.report = i end
+        end
+        imgui.EndChild()
+        local r = reports[sel.report]
+        if r then
+            imgui.Spacing()
+            imgui.PushItemWidth(-1) imgui.InputTextWithHint("##reply", U("Ответ игроку (уйдёт через /pm)"), B.reply, 160) imgui.PopItemWidth()
+            if imgui.Button(U("Ответить"), V2(fs * 8, fs * 2)) then
+                local text, id = getBuf(B.reply), r.id
+                post(function() if replyTo(id, text) then clearBuf(B.reply) end end)
+            end
+            imgui.SameLine()
+            if imgui.Button(U("Принять в /a"), V2(fs * 9, fs * 2)) then
+                local id = r.id
+                post(function() cmdAr(id) end)
+            end
+        else hint("Выберите репорт из списка.") end
+    end }
+
+    pages[4] = { "Мероприятия", function()
+        title("Анонсы МП в /aad")
+        imgui.Text(U("ID ведущего (для «Догони Инфернус»)")) imgui.SameLine()
+        imgui.PushItemWidth(fs * 5) imgui.InputText("##evid", B.evId, 12) imgui.PopItemWidth()
+        imgui.Spacing()
+        for i, e in ipairs(EVENTS) do
+            if imgui.Button(U(e[2]) .. "##e" .. i, V2(fs * 11, fs * 2)) then
+                local key, arg = e, getBuf(B.evId)
+                post(function() announceEvent(key, arg) end)
+            end
+            if i % 3 ~= 0 then imgui.SameLine() end
+        end
+    end }
+
+    pages[5] = { "Фракции", function()
+        title("Наборы, отборы, лидерки")
+        imgui.BeginChild("##frlist", V2(0, fs * 11), true)
+        for i, f in ipairs(FRACTIONS) do
+            if imgui.Selectable(U(f[2]) .. "##f" .. i, sel.fraction == i) then sel.fraction = i end
+        end
+        imgui.EndChild()
+        local f = FRACTIONS[sel.fraction]
+        imgui.Spacing()
+        if not f then hint("Выберите фракцию.") return end
+        imgui.TextColored(YEL, U(f[2]))
+        if imgui.Button(U("Набор (/o)"), V2(fs * 9, fs * 2)) then post(function() recruit(f) end) end
+        imgui.SameLine()
+        if imgui.Button(U("Отбор (/aad)"), V2(fs * 9, fs * 2)) then post(function() tryoutAad(f) end) end
+        imgui.SameLine()
+        if imgui.Button(U("Отбор (/o)"), V2(fs * 9, fs * 2)) then post(function() tryoutO(f) end) end
+        if imgui.Button(U("Взять лидерку"), V2(fs * 9, fs * 2)) then post(function() tempLeader(f) end) end
+    end }
+
+    pages[6] = { "Биндер", function()
+        title("Свои бинды")
+        local names = sortedBindNames()
+        imgui.BeginChild("##bindlist", V2(fs * 12, fs * 10), true)
+        for _, n in ipairs(names) do
+            if imgui.Selectable(U("/" .. n) .. "##b" .. n, sel.bind == n) then sel.bind = n end
+        end
+        imgui.EndChild()
+        imgui.SameLine()
+        imgui.BeginChild("##bindinfo", V2(0, fs * 10), true)
+        local b = binds[sel.bind]
+        if b then
+            imgui.TextColored(YEL, U("/" .. sel.bind .. "  (пауза " .. b.delay .. " мс)"))
+            for i, l in ipairs(b.lines) do imgui.TextWrapped(toUi(i .. ". " .. l)) end
+        else hint("Выберите бинд слева или создайте новый ниже.") end
+        imgui.EndChild()
+        if b then
+            local name = sel.bind
+            if imgui.Button(U("Запустить"), V2(fs * 8, fs * 2)) then post(function() runBind(name, "") end) end
+            imgui.SameLine()
+            if imgui.Button(U("Удалить бинд"), V2(fs * 9, fs * 2)) then post(function() bindDelete(name) sel.bind = "" end) end
+        end
+        imgui.Spacing() imgui.Separator() imgui.TextColored(ACC, U("Новый бинд / добавить строку"))
+        imgui.PushItemWidth(fs * 10) imgui.InputTextWithHint("##bname", U("имя"), B.bindName, 24) imgui.PopItemWidth()
+        imgui.SameLine() imgui.PushItemWidth(-fs * 7) imgui.InputTextWithHint("##btext", U("текст; несколько строк через ;;"), B.bindText, 256) imgui.PopItemWidth()
+        imgui.SameLine()
+        if imgui.Button(U("Добавить"), V2(fs * 6, 0)) then
+            local name, text = trim(getBuf(B.bindName)):lower(), getBuf(B.bindText)
+            post(function()
+                local ok, msg, n2 = bindAdd(name, text)
+                bmsg(msg)
+                if ok then sel.bind = n2 clearBuf(B.bindText) end
+            end)
+        end
+    end }
+
+    pages[7] = { "Шпаргалки", function()
+        title("Свои заметки")
+        imgui.BeginChild("##notelist", V2(fs * 12, fs * 10), true)
+        for i, n in ipairs(notes) do
+            if imgui.Selectable(toUi(n.title) .. "##n" .. i, sel.note == i) then sel.note = i end
+        end
+        imgui.EndChild()
+        imgui.SameLine()
+        imgui.BeginChild("##noteinfo", V2(0, fs * 10), true)
+        local n = notes[sel.note]
+        if n then for _, l in ipairs(n.lines) do imgui.TextWrapped(toUi(l)) end
+        else hint("Выберите заметку слева или создайте новую ниже.") end
+        imgui.EndChild()
+        if n and imgui.Button(U("Удалить заметку"), V2(fs * 10, fs * 2)) then
+            local idx = sel.note
+            post(function() table.remove(notes, idx) saveNotes() sel.note = 0 end)
+        end
+        imgui.Spacing() imgui.Separator() imgui.TextColored(ACC, U("Новая заметка / добавить строку"))
+        imgui.PushItemWidth(fs * 10) imgui.InputTextWithHint("##ntitle", U("название"), B.noteTitle, 48) imgui.PopItemWidth()
+        imgui.SameLine() imgui.PushItemWidth(-fs * 7) imgui.InputTextWithHint("##ntext", U("текст; несколько строк через ;;"), B.noteText, 256) imgui.PopItemWidth()
+        imgui.SameLine()
+        if imgui.Button(U("Сохранить"), V2(fs * 6, 0)) then
+            local t, x = getBuf(B.noteTitle), getBuf(B.noteText)
+            post(function()
+                local ok, msg = noteAdd(t, x)
+                fmsg(msg)
+                if ok then clearBuf(B.noteText) end
+            end)
+        end
+    end }
+
+    ------------------------------------------------------------------
+    -- окно
+    ------------------------------------------------------------------
+    local function guarded(fn)
+        local ok, err = pcall(fn)
+        if not ok then
+            G.errors = G.errors + 1
+            print("[FH] gui error: " .. tostring(err))
+            if G.errors >= 3 then G.disabled = true G.show[0] = false end
+        end
+    end
+
+    local function drawBody()
+        -- левое меню
+        imgui.BeginChild("##side", V2(fs * 10, 0), true)
+        guarded(function()
+            imgui.TextColored(ACC, U("FilippHelper"))
+            imgui.TextColored(GRAY, U("v" .. VERSION))
+            imgui.Separator() imgui.Spacing()
+            for i, p in ipairs(pages) do
+                local active = G.page == i
+                if active then imgui.PushStyleColor(imgui.Col.Button, ACC) end
+                local clicked = imgui.Button(U(p[1]) .. "##p" .. i, V2(-1, fs * 2.2))
+                if active then imgui.PopStyleColor() end
+                if clicked then G.page = i end
+                imgui.Spacing()
+            end
+        end)
+        imgui.EndChild()
+        imgui.SameLine()
+        -- правая часть
+        imgui.BeginChild("##content", V2(0, 0), true)
+        guarded(function() pages[G.page][2]() end)
+        imgui.EndChild()
+    end
+
+    local function applyStyle()
+        local st = imgui.GetStyle()
+        st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding = 10, 8, 6, 6
+        st.WindowPadding, st.FramePadding, st.ItemSpacing = V2(12, 12), V2(8, 6), V2(8, 8)
+        local c, Col = st.Colors, imgui.Col
+        local function set(k, r, g, b, a) c[Col[k]] = imgui.ImVec4(r, g, b, a or 1) end
+        set("WindowBg", 0.07, 0.08, 0.10, 0.97) set("ChildBg", 0.10, 0.11, 0.14)
+        set("Border", 0.20, 0.22, 0.28) set("Text", 0.92, 0.93, 0.95)
+        set("FrameBg", 0.14, 0.16, 0.20) set("FrameBgHovered", 0.18, 0.21, 0.27) set("FrameBgActive", 0.20, 0.24, 0.31)
+        set("TitleBg", 0.09, 0.10, 0.13) set("TitleBgActive", 0.11, 0.13, 0.18)
+        set("Button", 0.16, 0.18, 0.24) set("ButtonHovered", 0.22, 0.46, 0.78) set("ButtonActive", 0.18, 0.40, 0.70)
+        set("Header", 0.20, 0.42, 0.72, 0.6) set("HeaderHovered", 0.24, 0.50, 0.85, 0.7) set("HeaderActive", 0.24, 0.50, 0.85)
+        set("Separator", 0.22, 0.25, 0.32)
+    end
+
+    imgui.OnInitialize(function()
+        local ok, err = pcall(function()
+            local io = imgui.GetIO()
+            io.Fonts:AddFontFromFileTTF(fontPath, fs, nil, io.Fonts:GetGlyphRangesCyrillic())
+            applyStyle()
+        end)
+        if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
+    end)
+
+    imgui.OnFrame(function() return G.show[0] and not G.disabled and not G.initFailed end, function(self)
+        self.HideCursor = false
+        imgui.SetNextWindowSize(V2(fs * 46, fs * 28), imgui.Cond.FirstUseEver)
+        imgui.SetNextWindowPos(V2(sw / 2, sh / 2), imgui.Cond.FirstUseEver, V2(0.5, 0.5))
+        if imgui.Begin("FilippHelper##fh", G.show, imgui.WindowFlags.NoCollapse) then
+            guarded(drawBody)
+        end
+        imgui.End()
+    end)
+
+    function G.ready() return not G.disabled and not G.initFailed end
+    function G.toggle() G.show[0] = not G.show[0] end
+    return G
+end
+
+local okG, gs = pcall(setupGui)
+if okG then guiState = gs else print("[FH] gui setup error: " .. tostring(gs)) end
+
+----------------------------------------------------------------------
 -- ОБРАБОТКА СООБЩЕНИЙ СЕРВЕРА
 ----------------------------------------------------------------------
 local function onServerMessageImpl(color, text)
@@ -1035,7 +1360,9 @@ end
 ----------------------------------------------------------------------
 local function registerCommands(reg)
     registerExtra(reg)
-    reg("fh", uiMenu)
+    reg("fh", function()
+        if guiState and guiState.ready() then guiState.toggle() else uiMenu() end
+    end)
     reg("reports", uiReports)
     reg("fcmd", uiMenu)
     reg("gw", function(p) gwStart(p, false) end)
@@ -1091,6 +1418,7 @@ function main()
 
     while true do
         wait(100)
+        runPosted()
         local okT, errT = pcall(uiTick)
         if not okT then print("[FH] tick error: " .. tostring(errT)) end
     end
