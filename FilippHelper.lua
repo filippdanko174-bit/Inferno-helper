@@ -720,6 +720,7 @@ end
 -- МЕРОПРИЯТИЯ: готовые анонсы в /aad
 ----------------------------------------------------------------------
 local D_EV, D_FR, D_FRACT, D_NOTES, D_NOTE, D_NOTEADD = 4140, 4141, 4142, 4144, 4145, 4146
+local D_EVPRIZE = 4149
 
 -- {ключ, название, строки анонса}. {id} подставляется для интерактивных МП.
 local EVENTS = {
@@ -778,7 +779,19 @@ end
 uiHandlers[D_EV] = function(button, list)
     if button == 0 then return end
     local e = EVENTS[list + 1]
-    if e then announceEvent(e) end
+    if not e then return end
+    ui.evPick = e
+    uiShow(D_EVPRIZE, "FH | Приз для МП «" .. e[2] .. "»",
+        "{FFFFFF}Введите приз (можно оставить пустым).\n" ..
+        (e[1] == "infern" and "{FFCC00}Для этого МП: ID ведущего, затем приз. Пример: 55 5кк\n" or "{A9A9A9}Пример: 5кк"),
+        "Объявить", "Назад", 1)
+end
+
+uiHandlers[D_EVPRIZE] = function(button, _, input)
+    local e = ui.evPick
+    ui.evPick = nil
+    if button == 0 or not e then return uiEvents() end
+    announceEvent(e, input or "")
 end
 
 ----------------------------------------------------------------------
