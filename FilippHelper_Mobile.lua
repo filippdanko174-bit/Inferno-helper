@@ -994,7 +994,7 @@ local ALIASES = {
     { "uw", "unwarn", "args" }, { "uj", "unjail", "args" }, { "unm", "unmute", "args" }, { "ub", "unban", "args" },
     { "ib", "iban", "args" }, { "ip", "pgetip", "args" }, { "bip", "banip", "args" },
     { "ofl", "offleader", "args" }, { "mkl", "makeleader", "args" },
-    { "fuel", "fuelcars", "none" }, { "fc", "fuelcars", "none" }, { "spc", "spawncars", "none" }, { "dva", "dvall", "none" }, { "gh", "ghetto", "none" }, { "gzc", "gzcolor", "args" },
+    { "fuel", "fuelcars", "none" }, { "fc", "fuelcars", "none" }, { "spc", "spawncars", "none" }, { "gh", "ghetto", "none" }, { "gzc", "gzcolor", "args" },
     { "wh", "warehouse", "optargs" }, { "gs", "getstats", "idopt" }, { "inv", "checkinv", "idopt" },
     { "bp", "setbizprod", "args" },
 }
@@ -1032,6 +1032,19 @@ local function cmdAr(id)
 end
 
 local vrThread
+-- удаление админ-каров всегда с предупреждением в /a и таймером 15 с
+local function dvTimer(spawn)
+    if vrThread then fmsg("Таймер уже идёт (остановить: /vrstop).") return end
+    vrThread = lua_thread.create(function()
+        pcall(function()
+            safeSend("/a Через 15 секунд админ-транспорт будет удалён" .. (spawn and " и весь транспорт сервера возвращён на места!" or "!"))
+            wait(15000)
+            safeSend("/dvall")
+            if spawn then wait(1500) safeSend("/spawncars") end
+        end)
+        vrThread = nil
+    end)
+end
 local function registerExtra(reg)
     reg("ev", function(p)
         local key, arg = p:match("^(%S+)%s*(.*)$")
@@ -1087,23 +1100,9 @@ local function registerExtra(reg)
         end
         claim(p)   -- свой текст: /z o otbor mp
     end)
-    reg("vr", function()
-        if vrThread then fmsg("Таймер уже идёт (остановить: /vrstop).") return end
-        vrThread = lua_thread.create(function()
-            pcall(function()
-                safeSend("/a Через 15 секунд весь транспорт на сервере будет удалён и возвращён на места!")
-                wait(15000)
-                safeSend("/dvall") wait(1500)
-                safeSend("/spawncars")
-            end)
-            vrThread = nil
-        end)
-    end)
-    reg("dvs", function()
-        lua_thread.create(function()
-            pcall(function() safeSend("/dvall") wait(1500) safeSend("/spawncars") end)
-        end)
-    end)
+    reg("vr", function() dvTimer(true) end)
+    reg("dva", function() dvTimer(false) end)
+    reg("dvs", function() dvTimer(true) end)
     reg("vrstop", function()
         if vrThread then
             pcall(function() vrThread:terminate() end)
@@ -1216,12 +1215,9 @@ end
 -- Окно /fh: таблица всех команд
 local function carsDo(kind)
     if kind == "spawn" then safeSend("/spawncars")
-    elseif kind == "dv" then safeSend("/dvall")
+    elseif kind == "dv" then dvTimer(false)
     elseif kind == "fuel" then safeSend("/fuelcars")
-    elseif kind == "dvs" then
-        lua_thread.create(function()
-            pcall(function() safeSend("/dvall") wait(1500) safeSend("/spawncars") end)
-        end)
+    elseif kind == "dvs" then dvTimer(true)
     end
 end
 
@@ -1247,8 +1243,8 @@ local MENU_ROWS = {
     { "/ib /ip /bip /ofl /mkl", "iban, pgetip, banip, offleader, makeleader" },
     { "/gs /inv [ID]", "getstats, checkinv (ID или из /re)" },
     { "/fuel /fc /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
-    { "/spc /dva /dvs", "spawncars; dvall; dvall + spawncars сразу" },
-    { "/vr  /vrstop", "таймер 15 с: удалить и вернуть весь транспорт" },
+    { "/spc /dva /dvs", "spawncars; удаление админ-каров (таймер 15 с в /a); то же + spawncars" },
+    { "/vr  /vrstop", "то же, что /dvs; отмена таймера" },
     { "#", "Прочее" },
     { "/z [ключ]", "занять задачу: 3 раза «z ...» в /a (список: /z)" },
     { "/vr  /vrstop", "респавн транспорта через 15 сек / отмена" },
@@ -1459,10 +1455,9 @@ local function setupGui()
         imgui.SameLine()
         if imgui.Button(U("Заправить кары") .. "##cf", bw) then post(function() carsDo("fuel") end) end
         imgui.Spacing()
-        hint("Таймер: предупреждение в /a, через 15 секунд удаление и спавн.")
-        if imgui.Button(U("Запустить таймер") .. "##cv", bw) then post(function() pcall(sampProcessChatInput, "/vr") end) end
-        imgui.SameLine()
-        if imgui.Button(U("Остановить таймер") .. "##cvs", bw) then post(function() pcall(sampProcessChatInput, "/vrstop") end) end
+        imgui.Spacing()
+        hint("Удаление админ-каров: сначала предупреждение в /a, через 15 секунд /dvall.")
+        if imgui.Button(U("Отменить удаление") .. "##cvs", bw) then post(function() pcall(sampProcessChatInput, "/vrstop") end) end
     end }
 
     pages[5] = { "Фракции", function()
