@@ -1038,15 +1038,22 @@ local D_RULES = 4150
 
 local D_CHK = 4151
 local ROLES = {
-    { "io", "ИО" }, { "zo", "ЗО" }, { "po", "ПО" }, { "ks", "КС" }, { "zks", "ЗКС" },
-    { "ga", "ГА" }, { "zga", "ЗГА" }, { "gsg", "ГС госс" }, { "gsgh", "ГС гетто" }, { "gsm", "ГС мафии" },
+    { "io", "ИО", "И.О. Основателя" }, { "zo", "ЗО", "Заместитель Основателя" }, { "po", "ПО", "Помощник Основателя" },
+    { "ks", "КС", "Куратор сервера" }, { "zks", "ЗКС", "Заместитель Куратора сервера" },
+    { "ga", "ГА", "Главный администратор" }, { "zga", "ЗГА", "Заместитель Главного администратора" },
+    { "gsg", "ГС госс", "Главный следящий за госс. структурами" }, { "gsgh", "ГС гетто", "Главный следящий за гетто" },
+    { "gsm", "ГС мафии", "Главный следящий за мафиями" },
 }
 
 -- sel: список названий должностей; пусто - общая проверка
 local function sayA1(sel)
     local lines = { "/a Проверка активности администрации!" }
     if sel and #sel > 0 then
-        lines[#lines + 1] = "/a Отзываются: " .. table.concat(sel, ", ") .. "."
+        for k = 1, #sel, 3 do
+            local part = {}
+            for m = k, math.min(k + 2, #sel) do part[#part + 1] = sel[m] end
+            lines[#lines + 1] = "/a " .. (k == 1 and "Отзываются: " or "") .. table.concat(part, ", ") .. (k + 2 >= #sel and "." or ",")
+        end
         lines[#lines + 1] = "/a Поставьте свой тег и напишите в /a цифру 1."
     else
         lines[#lines + 1] = "/a Главные и заместители главных следящих - поставьте свой тег."
@@ -1058,7 +1065,7 @@ end
 local function roleByToken(tok)
     tok = lower1251(tok):gsub("[%s,]", "")
     for _, r in ipairs(ROLES) do
-        if r[1] == tok or lower1251(r[2]):gsub("%s", "") == tok then return r[2] end
+        if r[1] == tok or lower1251(r[2]):gsub("%s", "") == tok then return r[3] end
     end
 end
 
@@ -1086,7 +1093,7 @@ end
 uiHandlers[D_CHK] = function(button, list)
     if button == 0 then return end
     local r = ROLES[list]
-    sayA1(r and { r[2] } or nil)
+    sayA1(r and { r[3] } or nil)
 end
 
 local function sayRules()
@@ -1664,7 +1671,7 @@ local function setupGui()
         end
         if imgui.Button(U("Проверить выбранных") .. "##i1", bw) then
             local names = {}
-            for i, r in ipairs(ROLES) do if sel.roles[i] then names[#names + 1] = r[2] end end
+            for i, r in ipairs(ROLES) do if sel.roles[i] then names[#names + 1] = r[3] end end
             post(function() infoDo("a1", names) end)
         end
         imgui.Spacing()
