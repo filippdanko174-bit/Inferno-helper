@@ -1169,13 +1169,21 @@ local ROLES = {
     { "ga", "ГА", "Главный администратор" }, { "zga", "ЗГА", "Заместитель Главного администратора" },
     { "gsg", "ГС госс", "Главный следящий за госс. структурами" }, { "gsgh", "ГС гетто", "Главный следящий за гетто" },
     { "gsm", "ГС мафии", "Главный следящий за мафиями" },
+    { "zgsg", "ЗГС госс", "Заместитель Главного следящего за госс. структурами" },
+    { "zgsgh", "ЗГС гетто", "Заместитель Главного следящего за гетто" },
+    { "zgsm", "ЗГС мафии", "Заместитель Главного следящего за мафиями" },
+    { "pgsg", "ПГС госс", "Помощник Главного следящего за госс. структурами" },
+    { "pgsgh", "ПГС гетто", "Помощник Главного следящего за гетто" },
+    { "pgsm", "ПГС мафии", "Помощник Главного следящего за мафиями" },
 }
 -- быстрые наборы должностей
 local CHK_PRESETS = {
     { "Руководство", { "io", "zo", "po", "ks", "zks" } },
     { "ГА и ЗГА", { "ga", "zga" } },
     { "Главные следящие", { "gsg", "gsgh", "gsm" } },
-    { "Все", { "io", "zo", "po", "ks", "zks", "ga", "zga", "gsg", "gsgh", "gsm" } },
+    { "ЗГС", { "zgsg", "zgsgh", "zgsm" } },
+    { "ПГС", { "pgsg", "pgsgh", "pgsm" } },
+    { "Все", { "io", "zo", "po", "ks", "zks", "ga", "zga", "gsg", "gsgh", "gsm", "zgsg", "zgsgh", "zgsm", "pgsg", "pgsgh", "pgsm" } },
 }
 
 -- ход проверки: кто ответил в /a
@@ -1198,11 +1206,24 @@ local function chkLines(sel, word, secs)
     local tail = secs > 0 and (" Время: " .. math.floor(secs) .. " сек.") or ""
     local lines = { "/a Проверка активности администрации!" }
     if sel and #sel > 0 then
-        for k = 1, #sel, 3 do
-            local part = {}
-            for m = k, math.min(k + 2, #sel) do part[#part + 1] = sel[m] end
-            lines[#lines + 1] = "/a " .. (k == 1 and "Отзываются: " or "") .. table.concat(part, ", ") .. (k + 2 >= #sel and "." or ",")
+        -- строки собираем по длине в символах (сервер режет сообщение на 128 байтах)
+        local function clen(x)
+            if #"я" == 2 then return #x - select(2, x:gsub("[\128-\191]", "")) end
+            return #x
         end
+        local cur, first = {}, true
+        local function flush(last)
+            if #cur == 0 then return end
+            lines[#lines + 1] = "/a " .. (first and "Отзываются: " or "") .. table.concat(cur, ", ") .. (last and "." or ",")
+            first, cur = false, {}
+        end
+        local used = 0
+        for _, name in ipairs(sel) do
+            if #cur > 0 and used + 2 + clen(name) > 95 then flush(false) used = 0 end
+            used = used + (#cur > 0 and 2 or 0) + clen(name)
+            cur[#cur + 1] = name
+        end
+        flush(true)
         lines[#lines + 1] = "/a Поставьте свой тег и напишите в /a " .. answer .. "." .. tail
     else
         lines[#lines + 1] = "/a Главные и заместители главных следящих - поставьте свой тег."
