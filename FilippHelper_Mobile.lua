@@ -417,6 +417,10 @@ local cfg = {
     bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
     alpha = 0.97,                   -- прозрачность фона
     glass = true,                   -- стиль Liquid Glass (стекло)
+    aiUrl = "https://api.openai.com/v1/chat/completions",
+    aiKey = "",
+    aiModel = "gpt-4o-mini",
+    aiPrompt = "Ты помощник администратора SA-MP сервера. Ответь игроку на репорт вежливо и по делу одним коротким сообщением (до 100 символов), без markdown. Если данных мало - попроси уточнить ID нарушителя. Не выдумывай правила и не обещай наказаний.",
 }
 
 local function configDir()
@@ -439,6 +443,8 @@ local function saveCfg()
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
         f:write("glass=", cfg.glass and "1" or "0", "\r\n")
+        f:write("aiurl=", cfg.aiUrl, "\r\n", "aikey=", cfg.aiKey, "\r\n", "aimodel=", cfg.aiModel, "\r\n")
+        f:write("aiprompt=", (cfg.aiPrompt:gsub("[\r\n]+", " ")), "\r\n")
         f:close()
     end)
 end
@@ -452,6 +458,10 @@ local function loadCfg()
             local k, v = line:match("^(%w+)=(.+)$")
             if k == "automp" then cfg.automp = (v == "1")
             elseif k == "glass" then cfg.glass = (v == "1")
+            elseif k == "aiurl" then cfg.aiUrl = v
+            elseif k == "aikey" then cfg.aiKey = v
+            elseif k == "aimodel" then cfg.aiModel = v
+            elseif k == "aiprompt" then cfg.aiPrompt = v
             elseif k == "alpha" then cfg.alpha = math.max(0.5, clamp01(v, cfg.alpha))
             elseif k == "accent" or k == "bg" then
                 local r, g, b = v:match("^([%d%.]+),([%d%.]+),([%d%.]+)$")
@@ -543,6 +553,120 @@ local function replyTo(id, text)
     if text == "" then return false end
     safeSend(string.format("/pm %s %s", id, text))
     return true
+end
+
+----------------------------------------------------------------------
+-- ИИ-ПОДСКАЗКА ОТВЕТА НА РЕПОРТ (любой сервис с OpenAI-совместимым API)
+-- Нужны библиотеки effil и requests. Ключ хранится только в config/FilippHelper_settings.txt.
+----------------------------------------------------------------------
+local AI = { busy = false, status = "", result = nil }
+
+function AI.ready() return trim(cfg.aiKey or "") ~= "" and trim(cfg.aiUrl or "") ~= "" end
+
+local function aiClean(text)
+    text = tostring(text or ""):gsub("[\r\n]+", " "):gsub("%s+", " ")
+    return trim(text)
+end
+
+-- запрос в отдельном потоке; cb(ok, текст_или_ошибка) вызывается из этого потока
+function AI.ask(system, user, cb)
+    if AI.busy then cb(false, "предыдущий запрос ещё идёт") return end
+    if not AI.ready() then cb(false, "не заполнены адрес API и ключ (/fh - Настройки или /aiset)") return end
+    AI.busy = true
+    lua_thread.create(function()
+        local ok, a, b = pcall(function()
+            if not encodeJson or not decodeJson then return false, "в загрузчике нет encodeJson/decodeJson" end
+            local okE, effil = pcall(require, "effil")
+            if not okE then return false, "не найдена библиотека effil" end
+            if not pcall(require, "requests") then return false, "не найдена библиотека requests" end
+            local body = encodeJson({
+                model = toUi(cfg.aiModel), temperature = 0.3, max_tokens = 220,
+                messages = {
+                    { role = "system", content = toUi(system) },
+                    { role = "user", content = toUi(user) },
+                },
+            })
+            local runner = effil.thread(function(url, key, payload)
+                local requests = require "requests"
+                local okR, res = pcall(requests.request, "POST", url, {
+                    headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. key },
+                    data = payload,
+                })
+                if not okR then return 0, tostring(res) end
+                return res.status_code or 0, res.text or ""
+            end)
+            local h = runner(trim(cfg.aiUrl), trim(cfg.aiKey), body)
+            local t0 = os.clock()
+            while true do
+                local st = h:status()
+                if st == "completed" then break end
+                if st == "failed" or st == "canceled" then return false, "запрос не выполнен" end
+                if os.clock() - t0 > 40 then pcall(function() h:cancel() end) return false, "таймаут ответа (40 с)" end
+                wait(100)
+            end
+            local code, text = h:get()
+            if code == 0 then return false, "нет связи: " .. tostring(text):sub(1, 80) end
+            local okJ, data = pcall(decodeJson, text)
+            if not okJ or type(data) ~= "table" then return false, "ответ не JSON (код " .. tostring(code) .. ")" end
+            if type(data.error) == "table" and data.error.message then return false, "API: " .. tostring(data.error.message):sub(1, 100) end
+            local msg = data.choices and data.choices[1] and data.choices[1].message
+            local content = msg and msg.content
+            if type(content) ~= "string" or content == "" then return false, "пустой ответ (код " .. tostring(code) .. ")" end
+            return true, aiClean(fromUi(content))
+        end)
+        AI.busy = false
+        if not ok then a, b = false, tostring(a) end
+        pcall(cb, a, b)
+    end)
+end
+
+function AI.suggest(r, cb)
+    AI.status = "ИИ думает..."
+    AI.ask(cfg.aiPrompt, "Репорт от игрока " .. r.name .. ": " .. r.text, function(ok, text)
+        AI.status = ok and "Ответ готов, проверьте и отправьте." or ("Ошибка: " .. tostring(text))
+        if ok then AI.result = { id = r.id, text = text } end
+        cb(ok, text)
+    end)
+end
+
+function AI.test()
+    AI.status = "Проверяю связь..."
+    AI.ask(cfg.aiPrompt, "Привет! Ответь одним коротким предложением.", function(ok, text)
+        AI.status = ok and ("Работает: " .. text) or ("Ошибка: " .. tostring(text))
+    end)
+end
+
+-- /ai [ID]: подсказка по репорту, текст попадает в строку ввода как /rr ID текст
+function AI.cmdAsk(p)
+    local id = (p or ""):match("^(%d+)")
+    local r
+    for _, x in ipairs(reports) do
+        if not id or x.id == id then r = x break end
+    end
+    if not r then fmsg("Репорт не найден. Список: /reports") return end
+    fmsg("Спрашиваю ИИ про репорт от " .. r.name .. "...")
+    AI.suggest(r, function(ok, text)
+        fmsg("ИИ: " .. tostring(text))
+        if ok then
+            sampSetChatInputText("/rr " .. r.id .. " " .. text)
+            sampSetChatInputEnabled(true)
+        end
+    end)
+end
+
+local AI_FIELDS = { url = "aiUrl", key = "aiKey", model = "aiModel", prompt = "aiPrompt" }
+function AI.cmdSet(p)
+    local k, v = (p or ""):match("^(%S+)%s*(.*)$")
+    local f = k and AI_FIELDS[lower1251(k)]
+    v = trim(v or "")
+    if not f or v == "" then
+        fmsg("/aiset url|key|model|prompt значение. Сейчас: ключ " .. (trim(cfg.aiKey) ~= "" and "задан" or "не задан") ..
+            ", модель " .. cfg.aiModel .. ". Проверка: /ai ID")
+        return
+    end
+    cfg[f] = v:gsub("[\r\n]+", " ")
+    saveCfg()
+    fmsg("ИИ: " .. k .. " сохранено.")
 end
 
 local function uiReports()
@@ -1380,6 +1504,8 @@ local function registerExtra(reg)
     reg("vr", function() dvTimer(true) end)
     reg("dva", function() dvTimer(false) end)
     reg("dvs", function() dvTimer(true) end)
+    reg("ai", function(p) AI.cmdAsk(p) end)
+    reg("aiset", function(p) AI.cmdSet(p) end)
     reg("chkres", function() INFO.chkres() end)
     reg("chkend", function() INFO.chkend() end)
     reg("a1", function(p) if (p or "") == "" then INFO.a1() else INFO.a1args(p) end end)
@@ -1519,6 +1645,7 @@ local MENU_ROWS = {
     { "#", "Репорты" },
     { "/reports", "последние 15 репортов, быстрый ответ" },
     { "/rr [ID] текст", "ответить игроку через /pm" },
+    { "/ai [ID]  /aiset", "ИИ-подсказка ответа на репорт; настройка API (/aiset url|key|model|prompt)" },
     { "/ar ID", "ответ + текст жалобы в /a" },
     { "/tpl  /rt [ID] N", "шаблоны ответов: список, отправка" },
     { "#", "Мероприятия и опросы" },
@@ -1618,6 +1745,7 @@ local function setupGui()
     local B = {
         gwWord = buf(64), gwPrize = buf(96), reply = buf(512), evId = buf(12),
         bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160), claim = buf(64), evPrize = buf(96), chkWord = buf(24), chkSecs = buf(8), search = buf(48),
+        aiUrl = buf(200), aiKey = buf(200), aiModel = buf(64), aiPrompt = buf(700),
     }
     local accBuf = imgui.new.float[3](cfg.accent[1], cfg.accent[2], cfg.accent[3])
     local bgBuf = imgui.new.float[3](cfg.bg[1], cfg.bg[2], cfg.bg[3])
@@ -1627,6 +1755,22 @@ local function setupGui()
     local applyStyle   -- определяется ниже
 
     local function getBuf(b) return fromUi(ffi.string(b)) end
+    local function cutUtf8(s, n)
+        if #s <= n then return s end
+        local c = s:sub(1, n)
+        while #c > 0 and c:byte(#c) >= 0x80 and c:byte(#c) < 0xC0 do c = c:sub(1, -2) end
+        if #c > 0 and c:byte(#c) >= 0xC0 then c = c:sub(1, -2) end
+        return c
+    end
+    local function loadAiBufs()
+        ffi.copy(B.aiUrl, cutUtf8(toUi(cfg.aiUrl), 199)) ffi.copy(B.aiKey, cutUtf8(toUi(cfg.aiKey), 199))
+        ffi.copy(B.aiModel, cutUtf8(toUi(cfg.aiModel), 63)) ffi.copy(B.aiPrompt, cutUtf8(toUi(cfg.aiPrompt), 699))
+    end
+    loadAiBufs()
+    local function saveAi()
+        cfg.aiUrl, cfg.aiKey, cfg.aiModel, cfg.aiPrompt = trim(getBuf(B.aiUrl)), trim(getBuf(B.aiKey)), trim(getBuf(B.aiModel)), trim(getBuf(B.aiPrompt))
+        saveCfg()
+    end
     local function clearBuf(b) ffi.fill(b, ffi.sizeof(b), 0) end
     local sel = { report = 0, fraction = 0, bind = "", note = 0, roles = {} }
 
@@ -1698,6 +1842,11 @@ local function setupGui()
             end
             imgui.EndChild()
             local r = reports[sel.report]
+            local res = AI.result
+            if res and r and res.id == r.id then
+                AI.result = nil
+                ffi.copy(B.reply, cutUtf8(toUi(res.text), 500))
+            end
             if r then
                 imgui.Spacing()
                 imgui.PushItemWidth(-1) imgui.InputTextWithHint("##reply", U("Ответ игроку (уйдёт через /pm)"), B.reply, 512) imgui.PopItemWidth()
@@ -1710,6 +1859,12 @@ local function setupGui()
                     local id = r.id
                     post(function() cmdAr(id) end)
                 end
+                imgui.SameLine()
+                if imgui.Button(U("ИИ ответ") .. "##aibtn", V2(fs * 8, fs * 2)) then
+                    local rr = r
+                    post(function() AI.suggest(rr, function() end) end)
+                end
+                if AI.status ~= "" then imgui.TextColored(GRAY, toUi(AI.status)) end
             else hint("Выберите репорт из списка.") end
         end
         imgui.Spacing() imgui.Separator() imgui.TextColored(ACC, U("Шаблоны ответов (нажмите - текст попадёт в поле ответа)"))
@@ -2020,6 +2175,20 @@ local function setupGui()
             post(saveCfg)
         end
         hint("То же вручную: /mpa. Переключатель командой: /fhset automp on|off.")
+        imgui.Spacing() imgui.Separator() imgui.Spacing()
+        title("ИИ-ответы на репорты")
+        hint("Любой сервис с OpenAI-совместимым API (chat/completions). Нужны библиотеки effil и requests.")
+        hint("Ключ хранится в moonloader/config/FilippHelper_settings.txt - не выкладывайте этот файл.")
+        local pw = (imgui.InputTextFlags and imgui.InputTextFlags.Password) or 0
+        imgui.Text(U("Адрес API")) imgui.PushItemWidth(-1) imgui.InputText("##aiurl", B.aiUrl, 200) imgui.PopItemWidth()
+        imgui.Text(U("Ключ API")) imgui.PushItemWidth(-1) imgui.InputText("##aikey", B.aiKey, 200, pw) imgui.PopItemWidth()
+        imgui.Text(U("Модель")) imgui.PushItemWidth(-1) imgui.InputText("##aimodel", B.aiModel, 60) imgui.PopItemWidth()
+        imgui.Text(U("Инструкция для ИИ (правила вашего сервера, стиль ответа)"))
+        imgui.PushItemWidth(-1) imgui.InputText("##aiprompt", B.aiPrompt, 690) imgui.PopItemWidth()
+        if imgui.Button(U("Сохранить") .. "##aisave", V2(fs * 9, fs * 2)) then post(function() saveAi() fmsg("Настройки ИИ сохранены.") end) end
+        imgui.SameLine()
+        if imgui.Button(U("Сохранить и проверить") .. "##aitest", V2(fs * 12, fs * 2)) then post(function() saveAi() AI.test() end) end
+        if AI.status ~= "" then imgui.TextWrapped(toUi(AI.status)) end
     end }
 
     pages[9] = { "Занять", function()
