@@ -1214,6 +1214,17 @@ uiHandlers[D_CMDPAGE] = function(button)
 end
 
 -- Окно /fh: таблица всех команд
+local function carsDo(kind)
+    if kind == "spawn" then safeSend("/spawncars")
+    elseif kind == "dv" then safeSend("/dvall")
+    elseif kind == "fuel" then safeSend("/fuelcars")
+    elseif kind == "dvs" then
+        lua_thread.create(function()
+            pcall(function() safeSend("/dvall") wait(1500) safeSend("/spawncars") end)
+        end)
+    end
+end
+
 local MENU_ROWS = {
     { "#", "Раздачи" },
     { "/gw слово | приз", "запустить раздачу (банк 500000, лвл 3, #9 15)" },
@@ -1237,6 +1248,7 @@ local MENU_ROWS = {
     { "/gs /inv [ID]", "getstats, checkinv (ID или из /re)" },
     { "/fuel /fc /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
     { "/spc /dva /dvs", "spawncars; dvall; dvall + spawncars сразу" },
+    { "/vr  /vrstop", "таймер 15 с: удалить и вернуть весь транспорт" },
     { "#", "Прочее" },
     { "/z [ключ]", "занять задачу: 3 раза «z ...» в /a (список: /z)" },
     { "/vr  /vrstop", "респавн транспорта через 15 сек / отмена" },
@@ -1435,6 +1447,22 @@ local function setupGui()
             end
             if i % 3 ~= 0 then imgui.SameLine() end
         end
+    end }
+
+    pages[10] = { "Транспорт", function()
+        title("Транспорт сервера")
+        local bw = V2(fs * 14, fs * 2)
+        if imgui.Button(U("Заспавнить кары сервера") .. "##cs", bw) then post(function() carsDo("spawn") end) end
+        imgui.SameLine()
+        if imgui.Button(U("Удалить админ-кары") .. "##cd", bw) then post(function() carsDo("dv") end) end
+        if imgui.Button(U("Удалить + заспавнить") .. "##cds", bw) then post(function() carsDo("dvs") end) end
+        imgui.SameLine()
+        if imgui.Button(U("Заправить кары") .. "##cf", bw) then post(function() carsDo("fuel") end) end
+        imgui.Spacing()
+        hint("Таймер: предупреждение в /a, через 15 секунд удаление и спавн.")
+        if imgui.Button(U("Запустить таймер") .. "##cv", bw) then post(function() pcall(sampProcessChatInput, "/vr") end) end
+        imgui.SameLine()
+        if imgui.Button(U("Остановить таймер") .. "##cvs", bw) then post(function() pcall(sampProcessChatInput, "/vrstop") end) end
     end }
 
     pages[5] = { "Фракции", function()
