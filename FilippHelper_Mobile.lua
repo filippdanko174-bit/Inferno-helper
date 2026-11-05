@@ -748,16 +748,25 @@ local function eventByKey(key)
 end
 
 local function announceEvent(e, arg)
-    local id = (arg ~= nil and arg:match("^%d+$")) or watchedId
-    local lines = { string.format("/aad [МП] Внимание, игроки! Скоро стартует мероприятие «%s».", e[2]) }
-    for k = 3, #e do
-        local line = e[k]
-        if line:find("{id}", 1, true) then
-            if not id then fmsg("Нужен ID ведущего: /ev " .. e[1] .. " ID") return end
-            line = line:gsub("{id}", id)
-        end
-        lines[#lines + 1] = "/aad [МП] " .. line
+    arg = trim(arg or "")
+    local needId = false
+    for k = 3, #e do if e[k]:find("{id}", 1, true) then needId = true end end
+    local id, prize = nil, arg
+    if needId then
+        local a, b = arg:match("^(%d+)%s*(.*)$")
+        if a then id, prize = a, b else id, prize = watchedId, arg end
+        if not id then fmsg("Нужен ID ведущего: /ev " .. e[1] .. " ID [приз]") return end
     end
+    prize = trim(prize or "")
+    local lines = {
+        string.format("/aad [МП] Внимание, игроки! Скоро стартует мероприятие «%s».", e[2]),
+    }
+    for k = 3, #e do
+        lines[#lines + 1] = "/aad [МП] " .. e[k]:gsub("{id}", id or "")
+    end
+    if prize ~= "" then lines[#lines + 1] = "/aad [МП] Приз победителю: " .. prize .. "." end
+    lines[#lines + 1] = "/aad [МП] Участие свободное для всех. Ждите открытия телепорта."
+    lines[#lines + 1] = "/aad [МП] Нарушители правил МП будут удалены без права на приз."
     sendSeq(lines, SEND_GAP, cfg.automp and function() armAutoMp() end or nil)
 end
 
@@ -815,7 +824,9 @@ local function tryoutO(f)
         "/o [Отбор] Идёт отбор на пост лидера: " .. f[2] .. ".",
         "/o [Отбор] Нужно: 13+, связь ВК, знание " .. RULES_BY_KIND[f[4]] .. ".",
         "/o [Отбор] Желающие - пишите /gomp.",
-    }, 2500, function() armAutoMp() end)
+    }, 2500, function()
+        if cfg.automp then armAutoMp() else sampSetChatInputText("/mp ") sampSetChatInputEnabled(true) end
+    end)
 end
 
 local function tempLeader(f) safeSend("/templeader " .. f[3]) end
@@ -966,7 +977,7 @@ end
 -- args - нужны параметры; idin - вставить "/cmd ID " в строку ввода; idopt - ID из аргумента или из /re;
 -- optargs - параметры необязательны; none - без параметров
 local ALIASES = {
-    { "jj", "jail", "idin" }, { "mm", "mute", "idin" }, { "ww", "warn", "idin" }, { "bb", "ban", "args" },
+    { "jj", "jail", "idin" }, { "mut", "mute", "idin" }, { "ww", "warn", "idin" }, { "bb", "ban", "args" },
     { "uw", "unwarn", "args" }, { "uj", "unjail", "args" }, { "unm", "unmute", "args" }, { "ub", "unban", "args" },
     { "ib", "iban", "args" }, { "ip", "pgetip", "args" }, { "bip", "banip", "args" },
     { "ofl", "offleader", "args" }, { "mkl", "makeleader", "args" },
@@ -1140,7 +1151,7 @@ local CMD_PAGES = {
       "Строка с / уходит как команда, остальное - в обычный чат." },
     { "Мероприятия",
       "{66CCFF}/ev {FFFFFF}- список МП, выбрали - объявление ушло в /aad\n" ..
-      "{66CCFF}/ev ключ {FFFFFF}- сразу объявить (например /ev svet). Для «infern»: /ev infern ID\n\n" ..
+      "{66CCFF}/ev ключ {FFFFFF}- сразу объявить (например /ev svet). Для «infern»: /ev infern ID. Приз: /ev svet 5кк или /ev infern ID 5кк\n\n" ..
       "{A9A9A9}Ключи: svet poliv derbi pryat parkur rulet kovsh myaso dogon car parash digl sultan paint krug infern" },
     { "Фракции",
       "{66CCFF}/fr {FFFFFF}- окно фракций: набор, отбор, временная лидерка\n" ..
@@ -1150,7 +1161,7 @@ local CMD_PAGES = {
       "{66CCFF}/tlead ключ {FFFFFF}- взять временную лидерку (/templeader)\n\n" ..
       "{A9A9A9}Ключи: rus jap ita fun out rif bal azt gro vag arm hos mer rad swt gov lsp fbi rcp sud" },
     { "Наказания",
-      "{FFFFFF}Вставляют команду с ID в строку ввода: {66CCFF}/jj /mm /ww {A9A9A9}(jail, mute, warn)\n" ..
+      "{FFFFFF}Вставляют команду с ID в строку ввода: {66CCFF}/jj /mut /ww {A9A9A9}(jail, mute, warn)\n" ..
       "{FFFFFF}С параметрами: {66CCFF}/bb /uw /uj /unm /ub /ib /ip /bip /ofl /mkl /gzc /bp\n" ..
       "{FFFFFF}По ID или из /re: {66CCFF}/gs /inv {A9A9A9}(getstats, checkinv)\n" ..
       "{FFFFFF}Без параметров: {66CCFF}/fuel /gh /wh\n\n" ..
@@ -1196,13 +1207,13 @@ local MENU_ROWS = {
     { "/ar ID", "ответ + текст жалобы в /a" },
     { "/tpl  /rt [ID] N", "шаблоны ответов: список, отправка" },
     { "#", "Мероприятия и опросы" },
-    { "/ev [ключ] [ID]", "анонс МП в /aad (список: /ev)" },
+    { "/ev [ключ] [ID] [приз]", "анонс МП в /aad с призом (список: /ev)" },
     { "/poll должность ник", "опрос об оценке работы админа" },
     { "#", "Фракции" },
     { "/fr", "окно: набор, отбор, лидерка" },
     { "/nab /otb /otbo /tlead ключ", "набор /o, отбор /aad, отбор /o, лидерка" },
     { "#", "Наказания" },
-    { "/jj /mm /ww [ID]", "jail, mute, warn - вставят команду в ввод" },
+    { "/jj /mut /ww [ID]", "jail, mute, warn - вставят команду в ввод" },
     { "/bb /uw /uj /unm /ub", "ban, unwarn, unjail, unmute, unban" },
     { "/ib /ip /bip /ofl /mkl", "iban, pgetip, banip, offleader, makeleader" },
     { "/gs /inv [ID]", "getstats, checkinv (ID или из /re)" },
@@ -1281,7 +1292,7 @@ local function setupGui()
     local function buf(n) return imgui.new.char[n]() end
     local B = {
         gwWord = buf(64), gwPrize = buf(96), reply = buf(512), evId = buf(12),
-        bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160), claim = buf(64),
+        bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160), claim = buf(64), evPrize = buf(96),
     }
     local accBuf = imgui.new.float[3](cfg.accent[1], cfg.accent[2], cfg.accent[3])
     local bgBuf = imgui.new.float[3](cfg.bg[1], cfg.bg[2], cfg.bg[3])
@@ -1395,10 +1406,12 @@ local function setupGui()
         title("Анонсы МП в /aad")
         imgui.Text(U("ID ведущего (для «Догони Инфернус»)")) imgui.SameLine()
         imgui.PushItemWidth(fs * 5) imgui.InputText("##evid", B.evId, 12) imgui.PopItemWidth()
+        imgui.Text(U("Приз (необязательно)")) imgui.SameLine()
+        imgui.PushItemWidth(fs * 14) imgui.InputText("##evprize", B.evPrize, 90) imgui.PopItemWidth()
         imgui.Spacing()
         for i, e in ipairs(EVENTS) do
             if imgui.Button(U(e[2]) .. "##e" .. i, V2(fs * 11, fs * 2)) then
-                local key, arg = e, getBuf(B.evId)
+                local key, arg = e, (getBuf(B.evId) .. " " .. getBuf(B.evPrize))
                 post(function() announceEvent(key, arg) end)
             end
             if i % 3 ~= 0 then imgui.SameLine() end
