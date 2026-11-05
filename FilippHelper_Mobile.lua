@@ -683,6 +683,38 @@ uiHandlers[D_GWSTART] = function(button, _, input)
 end
 
 ----------------------------------------------------------------------
+-- ЗАНЯТЬ ЗАДАЧУ: "z ..." несколько раз в /a
+----------------------------------------------------------------------
+local D_Z = 4148
+local CLAIM_COUNT = 3
+-- {ключ, текст после "z "}
+local CLAIMS = {
+    { "ao", "aad otbor" }, { "oo", "o otbor" }, { "am", "aad mp" }, { "ar", "aad razdacha" },
+    { "sp", "spawn" }, { "on", "o nabor" }, { "aom", "aad otbor mp" }, { "oom", "o otbor mp" },
+}
+
+local function claim(text, count)
+    text = trim(text or "")
+    if text == "" then return end
+    count = math.max(1, math.min(5, tonumber(count) or CLAIM_COUNT))
+    local lines = {}
+    for i = 1, count do lines[i] = "/a z " .. text end
+    sendSeq(lines, SEND_GAP)
+end
+
+local function uiClaims()
+    local t = {}
+    for i, c in ipairs(CLAIMS) do t[i] = string.format("{FFFF00}z %s {A9A9A9}(/z %s)", c[2], c[1]) end
+    uiShow(D_Z, "FH | Занять", table.concat(t, "\n"), "Занять", "Закрыть", 2)
+end
+
+uiHandlers[D_Z] = function(button, list)
+    if button == 0 then return end
+    local c = CLAIMS[list + 1]
+    if c then claim(c[2]) end
+end
+
+----------------------------------------------------------------------
 -- МЕРОПРИЯТИЯ: готовые анонсы в /aad
 ----------------------------------------------------------------------
 local D_EV, D_FR, D_FRACT, D_NOTES, D_NOTE, D_NOTEADD = 4140, 4141, 4142, 4144, 4145, 4146
@@ -1019,6 +1051,15 @@ local function registerExtra(reg)
 
     reg("ar", function(p) cmdAr(p:match("^(%d+)") or watchedId) end)
 
+    reg("z", function(p)
+        local key, rest = p:match("^(%S+)%s*(.*)$")
+        if not key then uiClaims() return end
+        local lk = lower1251(key)
+        for _, c in ipairs(CLAIMS) do
+            if c[1] == lk then claim(c[2], rest) return end
+        end
+        claim(p)   -- свой текст: /z o otbor mp
+    end)
     reg("vr", function()
         if vrThread then fmsg("Таймер уже идёт (остановить: /vrstop).") return end
         vrThread = lua_thread.create(function()
@@ -1164,6 +1205,7 @@ local MENU_ROWS = {
     { "/gs /inv [ID]", "getstats, checkinv (ID или из /re)" },
     { "/fuel /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
     { "#", "Прочее" },
+    { "/z [ключ]", "занять задачу: 3 раза «z ...» в /a (список: /z)" },
     { "/vr  /vrstop", "респавн транспорта через 15 сек / отмена" },
     { "/mpa  /fhset automp on|off", "ввести /mp и нажать 1-ю строку / авто-режим" },
     { "/fbind  /bnd", "свой биндер: окно и команды (справка /binder)" },
@@ -1236,7 +1278,7 @@ local function setupGui()
     local function buf(n) return imgui.new.char[n]() end
     local B = {
         gwWord = buf(64), gwPrize = buf(96), reply = buf(512), evId = buf(12),
-        bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160),
+        bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160), claim = buf(64),
     }
     local accBuf = imgui.new.float[3](cfg.accent[1], cfg.accent[2], cfg.accent[3])
     local bgBuf = imgui.new.float[3](cfg.bg[1], cfg.bg[2], cfg.bg[3])
@@ -1490,6 +1532,27 @@ local function setupGui()
             post(saveCfg)
         end
         hint("То же вручную: /mpa. Переключатель командой: /fhset automp on|off.")
+    end }
+
+    pages[9] = { "Занять", function()
+        title("Занять задачу")
+        hint("Нажмите кнопку - в /a три раза подряд уйдёт «z ...».")
+        imgui.Spacing()
+        for i, c in ipairs(CLAIMS) do
+            if imgui.Button(toUi("z " .. c[2]) .. "##z" .. i, V2(fs * 11, fs * 2)) then
+                local txt = c[2]
+                post(function() claim(txt) end)
+            end
+            if i % 3 ~= 0 then imgui.SameLine() end
+        end
+        imgui.Spacing() imgui.Separator() imgui.Spacing()
+        imgui.Text(U("Свой текст (после «z »)"))
+        imgui.PushItemWidth(-fs * 7) imgui.InputText("##claimtext", B.claim, 64) imgui.PopItemWidth()
+        imgui.SameLine()
+        if imgui.Button(U("Занять") .. "##claimgo", V2(fs * 6, 0)) then
+            local txt = getBuf(B.claim)
+            post(function() claim(txt) end)
+        end
     end }
 
     ------------------------------------------------------------------
