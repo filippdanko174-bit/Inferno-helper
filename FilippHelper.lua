@@ -1584,7 +1584,13 @@ local function setupGui()
             imgui.TextColored(ACC, U("FilippHelper"))
             imgui.TextColored(GRAY, U("v" .. VERSION))
             imgui.Separator() imgui.Spacing()
-            for i, p in ipairs(pages) do
+            -- порядок кнопок: настройки всегда в самом низу
+            local order, settingsIdx = {}, #pages
+            for i, p in ipairs(pages) do if p[1] == "Настройки" then settingsIdx = i else order[#order + 1] = i end end
+            order[#order + 1] = settingsIdx
+            for _, i in ipairs(order) do
+                local p = pages[i]
+                if i == settingsIdx then imgui.Separator() imgui.Spacing() end
                 local active = G.page == i
                 if active then imgui.PushStyleColor(imgui.Col.Button, ACC) end
                 local clicked = imgui.Button(U(p[1]) .. "##p" .. i, V2(-1, fs * 2.2))
