@@ -1179,6 +1179,7 @@ local ROLES = {
 -- быстрые наборы должностей
 local CHK_PRESETS = {
     { "Руководство", { "io", "zo", "po", "ks", "zks" } },
+    { "Следящие", { "gsg", "gsgh", "gsm", "zgsg", "zgsgh", "zgsm", "pgsg", "pgsgh", "pgsm" } },
     { "ГА и ЗГА", { "ga", "zga" } },
     { "Главные следящие", { "gsg", "gsgh", "gsm" } },
     { "ЗГС", { "zgsg", "zgsgh", "zgsm" } },
@@ -1988,9 +1989,18 @@ local function setupGui()
         end
         if imgui.Button(U("Сбросить") .. "##prer", V2(fs * 7, fs * 1.8)) then sel.roles = {} end
         imgui.Spacing()
-        for i, r in ipairs(ROLES) do
-            if imgui.Selectable(U(r[2]) .. "##crole" .. i, sel.roles[i] == true, 0, V2(fs * 6, fs * 1.4)) then sel.roles[i] = not sel.roles[i] end
-            if i % 5 ~= 0 and i < #ROLES then imgui.SameLine() end
+        local function roleBtn(i)
+            if imgui.Selectable(U(ROLES[i][2]) .. "##crole" .. i, sel.roles[i] == true, 0, V2(fs * 6, fs * 1.4)) then sel.roles[i] = not sel.roles[i] end
+        end
+        imgui.TextColored(ACC, U("Руководящие"))
+        for i = 1, 7 do
+            roleBtn(i)
+            if i ~= 4 and i < 7 then imgui.SameLine() end
+        end
+        imgui.Spacing() imgui.TextColored(ACC, U("Следящие (ГС, ЗГС, ПГС по структурам)"))
+        for i = 8, #ROLES do
+            roleBtn(i)
+            if (i - 7) % 3 ~= 0 and i < #ROLES then imgui.SameLine() end
         end
         imgui.Spacing()
         imgui.Text(U("Ответ")) imgui.SameLine()
