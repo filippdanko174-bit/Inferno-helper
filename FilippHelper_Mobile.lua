@@ -409,6 +409,128 @@ end
 
 
 ----------------------------------------------------------------------
+-- НАСТРОЙКИ, ШАБЛОНЫ ОТВЕТОВ, АВТО-/mp
+----------------------------------------------------------------------
+local cfg = {
+    automp = true,                  -- после анонса МП вводить /mp и нажимать 1-ю строку
+    accent = { 0.26, 0.62, 0.96 },  -- цвет акцента окна
+    bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
+    alpha = 0.97,                   -- прозрачность фона
+}
+
+local function configDir()
+    local dir = getWorkingDirectory() .. "/config"
+    pcall(createDirectory, dir)
+    return dir
+end
+
+local function clamp01(v, default)
+    v = tonumber(v)
+    if not v then return default end
+    return math.max(0, math.min(1, v))
+end
+
+local function saveCfg()
+    pcall(function()
+        local f = assert(io.open(configDir() .. "/FilippHelper_settings.txt", "wb"))
+        f:write("automp=", cfg.automp and "1" or "0", "\r\n")
+        f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
+        f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
+        f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
+        f:close()
+    end)
+end
+
+local function loadCfg()
+    local ok, err = pcall(function()
+        local f = io.open(configDir() .. "/FilippHelper_settings.txt", "rb")
+        if not f then return end
+        for line in f:lines() do
+            line = line:gsub("\r$", "")
+            local k, v = line:match("^(%w+)=(.+)$")
+            if k == "automp" then cfg.automp = (v == "1")
+            elseif k == "alpha" then cfg.alpha = math.max(0.5, clamp01(v, cfg.alpha))
+            elseif k == "accent" or k == "bg" then
+                local r, g, b = v:match("^([%d%.]+),([%d%.]+),([%d%.]+)$")
+                if r then cfg[k] = { clamp01(r, cfg[k][1]), clamp01(g, cfg[k][2]), clamp01(b, cfg[k][3]) } end
+            end
+        end
+        f:close()
+    end)
+    if not ok then print("[FH] settings load error: " .. tostring(err)) end
+end
+
+-- Шаблоны ответов на репорты
+local templates = {}
+local TPL_MAX, TPL_LEN = 30, 120
+local DEFAULT_TEMPLATES = {
+    "Здравствуйте! Ваша жалоба принята, разбираемся.",
+    "Передано на рассмотрение старшей администрации.",
+    "Уточните, пожалуйста: ID нарушителя и что произошло.",
+    "Нарушений не обнаружено.",
+    "Игрок наказан, спасибо за обращение!",
+    "С таким вопросом обратитесь на форум проекта.",
+    "Приятной игры на нашем сервере!",
+}
+
+local function saveTemplates()
+    pcall(function()
+        local f = assert(io.open(configDir() .. "/FilippHelper_templates.txt", "wb"))
+        for _, t in ipairs(templates) do f:write("> ", t, "\r\n") end
+        f:close()
+    end)
+end
+
+local function loadTemplates()
+    local ok, err = pcall(function()
+        local f = io.open(configDir() .. "/FilippHelper_templates.txt", "rb")
+        if f then
+            for line in f:lines() do
+                line = line:gsub("\r$", "")
+                if line:sub(1, 2) == "> " and #templates < TPL_MAX then templates[#templates + 1] = line:sub(3, TPL_LEN + 2) end
+            end
+            f:close()
+        end
+    end)
+    if not ok then print("[FH] templates load error: " .. tostring(err)) end
+    if #templates == 0 then
+        for i, t in ipairs(DEFAULT_TEMPLATES) do templates[i] = t end
+    end
+end
+
+local function tplAdd(text)
+    text = trim((text or ""):gsub("%c", " "))
+    if text == "" then return false, "Пустой шаблон." end
+    if #templates >= TPL_MAX then return false, "Лимит шаблонов: " .. TPL_MAX end
+    templates[#templates + 1] = text:sub(1, TPL_LEN)
+    saveTemplates()
+    return true, "Шаблон добавлен (всего " .. #templates .. ")."
+end
+
+-- Авто-/mp: ввести /mp и нажать первую строку открывшегося списка
+local autoMp = { armed = false, t0 = 0 }
+local function armAutoMp(force)
+    if not force and not cfg.automp then return end
+    autoMp.armed, autoMp.t0 = true, os.clock()
+    safeSend("/mp")
+end
+
+function ev.onShowDialog(id, style, title, b1, b2, text)
+    if not autoMp.armed then return end
+    if os.clock() - autoMp.t0 > 6 then autoMp.armed = false return end
+    if style ~= 2 and style ~= 4 and style ~= 5 then return end   -- только списки
+    autoMp.armed = false
+    lua_thread.create(function()
+        wait(150)
+        pcall(sampSendDialogResponse, id, 1, 0, "")
+    end)
+    return false
+end
+
+loadCfg()
+loadTemplates()
+
+----------------------------------------------------------------------
 -- РЕПОРТЫ: журнал последних обращений и быстрый ответ
 ----------------------------------------------------------------------
 local D_MENU, D_RLIST, D_RREPLY, D_GWSTART = 4120, 4121, 4122, 4123
@@ -432,13 +554,34 @@ local function uiReports()
     uiShow(D_RLIST, "FH | Последние репорты", table.concat(t, "\n"), "Ответить", "Закрыть", 2)
 end
 
+local D_RTPL = 4147
+local function findReport(id)
+    for _, r in ipairs(reports) do if r.id == id then return r end end
+end
+
+local function uiTemplatesFor(r)
+    local t = { "{33CC33}Написать свой ответ" }
+    for _, x in ipairs(templates) do t[#t + 1] = "{FFFFFF}" .. x end
+    uiShow(D_RTPL, "Ответ: " .. r.name .. "[" .. r.id .. "]", table.concat(t, "\n"), "Отправить", "Назад", 2)
+end
+
 uiHandlers[D_RLIST] = function(button, list)
     if button == 0 then return end
     local r = reports[list + 1]
     if not r then return uiReports() end
     ui.replyId = r.id
-    uiShow(D_RREPLY, "Ответ игроку " .. r.name .. "[" .. r.id .. "]",
-        "Жалоба: " .. r.text .. "\n\nВведите ответ (уйдёт через /pm):", "Отправить", "Назад", 1)
+    uiTemplatesFor(r)
+end
+
+uiHandlers[D_RTPL] = function(button, list)
+    local r = ui.replyId and findReport(ui.replyId)
+    if button == 0 or not r then return uiReports() end
+    if list == 0 then
+        uiShow(D_RREPLY, "Ответ игроку " .. r.name .. "[" .. r.id .. "]",
+            "Жалоба: " .. r.text .. "\n\nВведите ответ (уйдёт через /pm):", "Отправить", "Назад", 1)
+    elseif templates[list] then
+        replyTo(r.id, templates[list])
+    end
 end
 
 uiHandlers[D_RREPLY] = function(button, _, input)
@@ -580,7 +723,7 @@ local function announceEvent(e, arg)
         end
         lines[#lines + 1] = "/aad [МП] " .. line
     end
-    sendSeq(lines, SEND_GAP)
+    sendSeq(lines, SEND_GAP, cfg.automp and function() armAutoMp() end or nil)
 end
 
 local function uiEvents()
@@ -628,7 +771,7 @@ local function tryoutAad(f)
         "/aad [Отбор] Требования: возраст 13+, связь ВК, знание " .. RULES_BY_KIND[f[4]] .. ".",
         "/aad [Отбор] Ждите открытия телепорта.",
     }, SEND_GAP, function()
-        sampSetChatInputText("/mp ") sampSetChatInputEnabled(true)
+        if cfg.automp then armAutoMp() else sampSetChatInputText("/mp ") sampSetChatInputEnabled(true) end
     end)
 end
 
@@ -842,7 +985,7 @@ local function registerExtra(reg)
             if f then fn(f) else fmsg("Укажите фракцию: /" .. cmd .. " ключ (список ключей: /fr)") end
         end)
     end
-    byKey("nab", recruit) byKey("otb", tryoutAad) byKey("otbo", tryoutO) byKey("lead", tempLeader)
+    byKey("nab", recruit) byKey("otb", tryoutAad) byKey("otbo", tryoutO) byKey("tlead", tempLeader)
     reg("fr", uiFractions)
 
     reg("note", function(p)
@@ -896,6 +1039,34 @@ local function registerExtra(reg)
         else fmsg("Таймер не запущен.") end
     end)
 
+    reg("tpl", function(p)
+        local sub, rest = p:match("^(%S+)%s*(.*)$")
+        if sub == "add" then
+            local _, msg = tplAdd(rest) fmsg(msg)
+        elseif sub == "del" then
+            local n = tonumber(rest)
+            if n and templates[n] then table.remove(templates, n) saveTemplates() fmsg("Шаблон удалён.")
+            else fmsg("Использование: /tpl del N") end
+        else
+            fmsg("Шаблоны ответов (отправить: /rt [ID] N; добавить: /tpl add текст; удалить: /tpl del N):")
+            for i, t in ipairs(templates) do sampAddChatMessage(string.format("{FFFF00}%d. {FFFFFF}%s", i, t), -1) end
+        end
+    end)
+    reg("rt", function(p)
+        local id, n = p:match("^(%d+)%s+(%d+)$")
+        if not id then n = p:match("^(%d+)$") id = watchedId end
+        n = tonumber(n)
+        if not id or not n or not templates[n] then fmsg("Использование: /rt [ID] номер_шаблона (список: /tpl)") return end
+        replyTo(id, templates[n])
+    end)
+    reg("mpa", function() armAutoMp(true) end)
+    reg("fhset", function(p)
+        local k, v = p:match("^(%S+)%s+(%S+)$")
+        if k == "automp" and (v == "on" or v == "off") then
+            cfg.automp = (v == "on") saveCfg()
+            fmsg("Авто-/mp после анонса МП: " .. (cfg.automp and "включено" or "выключено"))
+        else fmsg("Использование: /fhset automp on|off (сейчас: " .. (cfg.automp and "on" or "off") .. ")") end
+    end)
     loadNotes()
 end
 
@@ -932,7 +1103,7 @@ local CMD_PAGES = {
       "{66CCFF}/nab ключ {FFFFFF}- набор в /o\n" ..
       "{66CCFF}/otb ключ {FFFFFF}- отбор на лидера в /aad (потом откроется ввод /mp)\n" ..
       "{66CCFF}/otbo ключ {FFFFFF}- отбор на лидера в /o\n" ..
-      "{66CCFF}/lead ключ {FFFFFF}- взять временную лидерку (/templeader)\n\n" ..
+      "{66CCFF}/tlead ключ {FFFFFF}- взять временную лидерку (/templeader)\n\n" ..
       "{A9A9A9}Ключи: rus jap ita fun out rif bal azt gro vag arm hos mer rad swt gov lsp fbi rcp sud" },
     { "Наказания",
       "{FFFFFF}Вставляют команду с ID в строку ввода: {66CCFF}/jj /mm /ww {A9A9A9}(jail, mute, warn)\n" ..
@@ -979,12 +1150,13 @@ local MENU_ROWS = {
     { "/reports", "последние 15 репортов, быстрый ответ" },
     { "/rr [ID] текст", "ответить игроку через /pm" },
     { "/ar ID", "ответ + текст жалобы в /a" },
+    { "/tpl  /rt [ID] N", "шаблоны ответов: список, отправка" },
     { "#", "Мероприятия и опросы" },
     { "/ev [ключ] [ID]", "анонс МП в /aad (список: /ev)" },
     { "/poll должность ник", "опрос об оценке работы админа" },
     { "#", "Фракции" },
     { "/fr", "окно: набор, отбор, лидерка" },
-    { "/nab /otb /otbo /lead ключ", "набор /o, отбор /aad, отбор /o, лидерка" },
+    { "/nab /otb /otbo /tlead ключ", "набор /o, отбор /aad, отбор /o, лидерка" },
     { "#", "Наказания" },
     { "/jj /mm /ww [ID]", "jail, mute, warn - вставят команду в ввод" },
     { "/bb /uw /uj /unm /ub", "ban, unwarn, unjail, unmute, unban" },
@@ -993,6 +1165,7 @@ local MENU_ROWS = {
     { "/fuel /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
     { "#", "Прочее" },
     { "/vr  /vrstop", "респавн транспорта через 15 сек / отмена" },
+    { "/mpa  /fhset automp on|off", "ввести /mp и нажать 1-ю строку / авто-режим" },
     { "/fbind  /bnd", "свой биндер: окно и команды (справка /binder)" },
     { "/notes", "шпаргалки (свои заметки)" },
 }
@@ -1052,7 +1225,7 @@ local function setupGui()
     if not fontPath then return nil end
 
     local G = { show = imgui.new.bool(false), page = 1, errors = 0, disabled = false, initFailed = false, fs = fs }
-    local ACC = imgui.ImVec4(0.26, 0.62, 0.96, 1)
+    local ACC = imgui.ImVec4(cfg.accent[1], cfg.accent[2], cfg.accent[3], 1)
     local YEL = imgui.ImVec4(1, 0.85, 0.35, 1)
     local GRAY = imgui.ImVec4(0.62, 0.65, 0.70, 1)
     local GREEN = imgui.ImVec4(0.40, 0.85, 0.50, 1)
@@ -1062,9 +1235,15 @@ local function setupGui()
     -- буферы ввода
     local function buf(n) return imgui.new.char[n]() end
     local B = {
-        gwWord = buf(64), gwPrize = buf(96), reply = buf(160), evId = buf(12),
-        bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256),
+        gwWord = buf(64), gwPrize = buf(96), reply = buf(512), evId = buf(12),
+        bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160),
     }
+    local accBuf = imgui.new.float[3](cfg.accent[1], cfg.accent[2], cfg.accent[3])
+    local bgBuf = imgui.new.float[3](cfg.bg[1], cfg.bg[2], cfg.bg[3])
+    local alphaBuf = imgui.new.float(cfg.alpha)
+    local autoBuf = imgui.new.bool(cfg.automp)
+    local applyStyle   -- определяется ниже
+
     local function getBuf(b) return fromUi(ffi.string(b)) end
     local function clearBuf(b) ffi.fill(b, ffi.sizeof(b), 0) end
     local sel = { report = 0, fraction = 0, bind = "", note = 0 }
@@ -1122,26 +1301,48 @@ local function setupGui()
 
     pages[3] = { "Репорты", function()
         title("Последние репорты")
-        if #reports == 0 then hint("Репортов пока нет.") return end
-        imgui.BeginChild("##replist", V2(0, fs * 11), true)
-        for i, r in ipairs(reports) do
-            if imgui.Selectable(toUi(string.format("[%s] %s: %s", r.id, r.name, r.text)) .. "##r" .. i, sel.report == i) then sel.report = i end
+        if #reports == 0 then
+            hint("Репортов пока нет.")
+        else
+            imgui.BeginChild("##replist", V2(0, fs * 9), true)
+            for i, r in ipairs(reports) do
+                if imgui.Selectable(toUi(string.format("[%s] %s: %s", r.id, r.name, r.text)) .. "##r" .. i, sel.report == i) then sel.report = i end
+            end
+            imgui.EndChild()
+            local r = reports[sel.report]
+            if r then
+                imgui.Spacing()
+                imgui.PushItemWidth(-1) imgui.InputTextWithHint("##reply", U("Ответ игроку (уйдёт через /pm)"), B.reply, 512) imgui.PopItemWidth()
+                if imgui.Button(U("Ответить"), V2(fs * 8, fs * 2)) then
+                    local text, id = getBuf(B.reply), r.id
+                    post(function() if replyTo(id, text) then clearBuf(B.reply) end end)
+                end
+                imgui.SameLine()
+                if imgui.Button(U("Принять в /a"), V2(fs * 9, fs * 2)) then
+                    local id = r.id
+                    post(function() cmdAr(id) end)
+                end
+            else hint("Выберите репорт из списка.") end
         end
-        imgui.EndChild()
-        local r = reports[sel.report]
-        if r then
-            imgui.Spacing()
-            imgui.PushItemWidth(-1) imgui.InputTextWithHint("##reply", U("Ответ игроку (уйдёт через /pm)"), B.reply, 160) imgui.PopItemWidth()
-            if imgui.Button(U("Ответить"), V2(fs * 8, fs * 2)) then
-                local text, id = getBuf(B.reply), r.id
-                post(function() if replyTo(id, text) then clearBuf(B.reply) end end)
+        imgui.Spacing() imgui.Separator() imgui.TextColored(ACC, U("Шаблоны ответов (нажмите - текст попадёт в поле ответа)"))
+        for i, t in ipairs(templates) do
+            if imgui.SmallButton(U("x") .. "##td" .. i) then
+                local idx = i
+                post(function() table.remove(templates, idx) saveTemplates() end)
             end
             imgui.SameLine()
-            if imgui.Button(U("Принять в /a"), V2(fs * 9, fs * 2)) then
-                local id = r.id
-                post(function() cmdAr(id) end)
-            end
-        else hint("Выберите репорт из списка.") end
+            if imgui.Selectable(toUi(t) .. "##tp" .. i, false) then ffi.copy(B.reply, toUi(t):sub(1, 500)) end
+        end
+        imgui.PushItemWidth(-fs * 7) imgui.InputTextWithHint("##tplnew", U("новый шаблон"), B.tpl, 160) imgui.PopItemWidth()
+        imgui.SameLine()
+        if imgui.Button(U("Добавить шаблон"), V2(fs * 8, 0)) then
+            local text = getBuf(B.tpl)
+            post(function()
+                local ok, msg = tplAdd(text)
+                fmsg(msg)
+                if ok then clearBuf(B.tpl) end
+            end)
+        end
     end }
 
     pages[4] = { "Мероприятия", function()
@@ -1244,6 +1445,53 @@ local function setupGui()
         end
     end }
 
+    local function applyColors()
+        cfg.accent = { accBuf[0], accBuf[1], accBuf[2] }
+        cfg.bg = { bgBuf[0], bgBuf[1], bgBuf[2] }
+        cfg.alpha = math.max(0.5, math.min(1, alphaBuf[0]))
+        ACC = imgui.ImVec4(cfg.accent[1], cfg.accent[2], cfg.accent[3], 1)
+        applyStyle()
+        post(saveCfg)
+    end
+    local PRESETS = {
+        { "Синяя", 0.26, 0.62, 0.96 }, { "Красная", 0.92, 0.30, 0.30 }, { "Зелёная", 0.30, 0.78, 0.45 },
+        { "Фиолетовая", 0.62, 0.40, 0.95 }, { "Оранжевая", 0.98, 0.58, 0.20 },
+    }
+
+    pages[8] = { "Настройки", function()
+        title("Оформление окна")
+        imgui.Text(U("Цвет акцента")) imgui.PushItemWidth(fs * 16)
+        if imgui.ColorEdit3("##acc", accBuf) then applyColors() end
+        imgui.PopItemWidth()
+        imgui.Text(U("Цвет фона")) imgui.PushItemWidth(fs * 16)
+        if imgui.ColorEdit3("##bg", bgBuf) then applyColors() end
+        imgui.PopItemWidth()
+        imgui.Text(U("Прозрачность фона")) imgui.PushItemWidth(fs * 16)
+        if imgui.SliderFloat("##alpha", alphaBuf, 0.5, 1.0) then applyColors() end
+        imgui.PopItemWidth()
+        imgui.Spacing() imgui.Text(U("Готовые цвета акцента:"))
+        for i, p in ipairs(PRESETS) do
+            if imgui.Button(U(p[1]) .. "##pr" .. i, V2(fs * 8, fs * 1.8)) then
+                accBuf[0], accBuf[1], accBuf[2] = p[2], p[3], p[4]
+                applyColors()
+            end
+            if i < #PRESETS then imgui.SameLine() end
+        end
+        if imgui.Button(U("Сбросить цвета"), V2(fs * 10, fs * 1.8)) then
+            accBuf[0], accBuf[1], accBuf[2] = 0.26, 0.62, 0.96
+            bgBuf[0], bgBuf[1], bgBuf[2] = 0.07, 0.08, 0.10
+            alphaBuf[0] = 0.97
+            applyColors()
+        end
+        imgui.Spacing() imgui.Separator() imgui.Spacing()
+        title("Мероприятия")
+        if imgui.Checkbox(U("После анонса МП вводить /mp и нажимать 1-ю строку"), autoBuf) then
+            cfg.automp = autoBuf[0] and true or false
+            post(saveCfg)
+        end
+        hint("То же вручную: /mpa. Переключатель командой: /fhset automp on|off.")
+    end }
+
     ------------------------------------------------------------------
     -- окно
     ------------------------------------------------------------------
@@ -1280,19 +1528,26 @@ local function setupGui()
         imgui.EndChild()
     end
 
-    local function applyStyle()
+    applyStyle = function()
         local st = imgui.GetStyle()
         st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding = 10, 8, 6, 6
         st.WindowPadding, st.FramePadding, st.ItemSpacing = V2(12, 12), V2(8, 6), V2(8, 8)
         local c, Col = st.Colors, imgui.Col
         local function set(k, r, g, b, a) c[Col[k]] = imgui.ImVec4(r, g, b, a or 1) end
-        set("WindowBg", 0.07, 0.08, 0.10, 0.97) set("ChildBg", 0.10, 0.11, 0.14)
-        set("Border", 0.20, 0.22, 0.28) set("Text", 0.92, 0.93, 0.95)
-        set("FrameBg", 0.14, 0.16, 0.20) set("FrameBgHovered", 0.18, 0.21, 0.27) set("FrameBgActive", 0.20, 0.24, 0.31)
-        set("TitleBg", 0.09, 0.10, 0.13) set("TitleBgActive", 0.11, 0.13, 0.18)
-        set("Button", 0.16, 0.18, 0.24) set("ButtonHovered", 0.22, 0.46, 0.78) set("ButtonActive", 0.18, 0.40, 0.70)
-        set("Header", 0.20, 0.42, 0.72, 0.6) set("HeaderHovered", 0.24, 0.50, 0.85, 0.7) set("HeaderActive", 0.24, 0.50, 0.85)
-        set("Separator", 0.22, 0.25, 0.32)
+        local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
+        local br, bg_, bb = cfg.bg[1], cfg.bg[2], cfg.bg[3]
+        local function lift(v, d) return math.max(0, math.min(1, v + d)) end
+        set("WindowBg", br, bg_, bb, cfg.alpha)
+        set("ChildBg", lift(br, 0.03), lift(bg_, 0.03), lift(bb, 0.04))
+        set("Border", lift(br, 0.13), lift(bg_, 0.14), lift(bb, 0.18)) set("Text", 0.92, 0.93, 0.95)
+        set("FrameBg", lift(br, 0.07), lift(bg_, 0.08), lift(bb, 0.10))
+        set("FrameBgHovered", lift(br, 0.11), lift(bg_, 0.13), lift(bb, 0.17)) set("FrameBgActive", lift(br, 0.13), lift(bg_, 0.16), lift(bb, 0.21))
+        set("TitleBg", lift(br, 0.02), lift(bg_, 0.02), lift(bb, 0.03)) set("TitleBgActive", lift(br, 0.04), lift(bg_, 0.05), lift(bb, 0.08))
+        set("Button", lift(br, 0.09), lift(bg_, 0.10), lift(bb, 0.14))
+        set("ButtonHovered", ar * 0.85, ag * 0.85, ab * 0.85) set("ButtonActive", ar * 0.7, ag * 0.7, ab * 0.7)
+        set("Header", ar * 0.75, ag * 0.75, ab * 0.75, 0.6) set("HeaderHovered", ar, ag, ab, 0.7) set("HeaderActive", ar, ag, ab)
+        set("CheckMark", ar, ag, ab) set("SliderGrab", ar, ag, ab) set("SliderGrabActive", ar * 0.8, ag * 0.8, ab * 0.8)
+        set("Separator", lift(br, 0.15), lift(bg_, 0.17), lift(bb, 0.22))
     end
 
     imgui.OnInitialize(function()
