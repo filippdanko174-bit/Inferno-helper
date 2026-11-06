@@ -1,38 +1,38 @@
--- FilippHelper (FH) -- помощник администратора SA-MP для MoonLoader. Автор: ByFilipp.
--- Файл на ПК должен быть в кодировке Windows-1251 (cp1251).
+-- FilippHelper (FH) -- ГЇГ®Г¬Г®Г№Г­ГЁГЄ Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Г  SA-MP Г¤Г«Гї MoonLoader. ГЂГўГІГ®Г°: ByFilipp.
+-- Г”Г Г©Г« Г­Г  ГЏГЉ Г¤Г®Г«Г¦ГҐГ­ ГЎГ»ГІГј Гў ГЄГ®Г¤ГЁГ°Г®ГўГЄГҐ Windows-1251 (cp1251).
 local okEv, ev = pcall(require, 'samp.events')
 if not okEv then ev = require 'lib.samp.events' end
 
--- @ENC-BEGIN (на ПК файл уже в cp1251, перекодировка не нужна)
+-- @ENC-BEGIN (Г­Г  ГЏГЉ ГґГ Г©Г« ГіГ¦ГҐ Гў cp1251, ГЇГҐГ°ГҐГЄГ®Г¤ГЁГ°Г®ГўГЄГ  Г­ГҐ Г­ГіГ¦Г­Г )
 local encOk, encoding = pcall(require, 'encoding')
 local enc8
 if encOk and encoding then
     encoding.default = 'CP1251'
     enc8 = encoding.UTF8
 end
-local GUI_ENCODING_OK = enc8 ~= nil                                     -- для окна mimgui нужна перекодировка в UTF-8
+local GUI_ENCODING_OK = enc8 ~= nil                                     -- Г¤Г«Гї Г®ГЄГ­Г  mimgui Г­ГіГ¦Г­Г  ГЇГҐГ°ГҐГЄГ®Г¤ГЁГ°Г®ГўГЄГ  Гў UTF-8
 local function toUi(s) if enc8 then return enc8:encode(s) end return s end    -- cp1251 -> UTF-8
 local function fromUi(s) if enc8 then return enc8:decode(s) end return s end  -- UTF-8 -> cp1251
-local function toGame(s) return s end     -- строка скрипта -> игра
-local function fromGame(s) return s end   -- игра -> строка скрипта
+local function toGame(s) return s end     -- Г±ГІГ°Г®ГЄГ  Г±ГЄГ°ГЁГЇГІГ  -> ГЁГЈГ°Г 
+local function fromGame(s) return s end   -- ГЁГЈГ°Г  -> Г±ГІГ°Г®ГЄГ  Г±ГЄГ°ГЁГЇГІГ 
 -- @ENC-END
 
 local VERSION = "1.1"
-local UPDATE_FILE = "FilippHelper.lua"   -- какой файл скачивать с GitHub при обновлении
-local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
-local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
+local UPDATE_FILE = "FilippHelper.lua"   -- ГЄГ ГЄГ®Г© ГґГ Г©Г« Г±ГЄГ Г·ГЁГўГ ГІГј Г± GitHub ГЇГ°ГЁ Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГЁ
+local MAX_CHAT_LEN = 128   -- ГЎГҐГ§Г®ГЇГ Г±Г­Г Гї Г¤Г«ГЁГ­Г  Г±ГІГ°Г®ГЄГЁ Г¤Г«Гї sampSendChat
+local SEND_GAP = 1100      -- ГЇГ ГіГ§Г  Г¬ГҐГ¦Г¤Гі Г±Г®Г®ГЎГ№ГҐГ­ГЁГїГ¬ГЁ (Г Г­ГІГЁГґГ«ГіГ¤ Г±ГҐГ°ГўГҐГ°Г )
 local MAX_REPORTS = 15
 
-local watchedId = nil   -- ID игрока из /re
-local reports = {}            -- последние репорты, новые в начале
+local watchedId = nil   -- ID ГЁГЈГ°Г®ГЄГ  ГЁГ§ /re
+local reports = {}            -- ГЇГ®Г±Г«ГҐГ¤Г­ГЁГҐ Г°ГҐГЇГ®Г°ГІГ», Г­Г®ГўГ»ГҐ Гў Г­Г Г·Г Г«ГҐ
 
 ----------------------------------------------------------------------
--- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+-- Г‚Г‘ГЏГЋГЊГЋГѓГЂГ’Г…Г‹ГњГЌГ›Г… Г”Г“ГЌГЉГ–Г€Г€
 ----------------------------------------------------------------------
 -- @LOWER-BEGIN
 local LOWER_MAP = {}
 for b = 192, 223 do LOWER_MAP[string.char(b)] = string.char(b + 32) end
-LOWER_MAP[string.char(168)] = string.char(184) -- Ё -> ё
+LOWER_MAP[string.char(168)] = string.char(184) -- ВЁ -> Вё
 local function lower1251(s)
     return (s:lower():gsub("[\192-\223\168]", LOWER_MAP))
 end
@@ -40,7 +40,7 @@ end
 
 local function trim(s) return s:match("^%s*(.-)%s*$") end
 
--- Причина наказания: если сервер показывает список причин, выбираем подходящую по нашему тексту
+-- ГЏГ°ГЁГ·ГЁГ­Г  Г­Г ГЄГ Г§Г Г­ГЁГї: ГҐГ±Г«ГЁ Г±ГҐГ°ГўГҐГ° ГЇГ®ГЄГ Г§Г»ГўГ ГҐГІ Г±ГЇГЁГ±Г®ГЄ ГЇГ°ГЁГ·ГЁГ­, ГўГ»ГЎГЁГ°Г ГҐГ¬ ГЇГ®Г¤ГµГ®Г¤ГїГ№ГіГѕ ГЇГ® Г­Г ГёГҐГ¬Гі ГІГҐГЄГ±ГІГі
 local PUN = { pending = nil }
 function PUN.note(raw)
     local kind, reason = tostring(raw or ""):match("^/(%a+)%s+%S+%s+(.+)$")
@@ -58,7 +58,7 @@ local function safeSend(text)
     if not ok then print("[FH] sampSendChat error: " .. tostring(err)) end
 end
 
--- Отправка списка строк одним потоком с паузами
+-- ГЋГІГЇГ°Г ГўГЄГ  Г±ГЇГЁГ±ГЄГ  Г±ГІГ°Г®ГЄ Г®Г¤Г­ГЁГ¬ ГЇГ®ГІГ®ГЄГ®Г¬ Г± ГЇГ ГіГ§Г Г¬ГЁ
 local function sendSeq(lines, gap, onDone, startDelay)
     return lua_thread.create(function()
         local ok, err = pcall(function()
@@ -79,14 +79,14 @@ local function fmsg(text)
 end
 
 ----------------------------------------------------------------------
--- БИНДЕР: свои команды, создаются прямо в игре (/binder -- справка)
+-- ГЃГ€ГЌГ„Г…Гђ: Г±ГўГ®ГЁ ГЄГ®Г¬Г Г­Г¤Г», Г±Г®Г§Г¤Г ГѕГІГ±Гї ГЇГ°ГїГ¬Г® Гў ГЁГЈГ°ГҐ (/binder -- Г±ГЇГ°Г ГўГЄГ )
 ----------------------------------------------------------------------
 local BIND_MAX, BIND_LINES = 50, 20
-local binds = {}          -- binds[имя] = { delay = мс, lines = { ... } }
+local binds = {}          -- binds[ГЁГ¬Гї] = { delay = Г¬Г±, lines = { ... } }
 local bindFile
 local bindBuiltin, bindReg = {}, nil
 local bindRunning = false
--- имена, которые бинд занимать не должен (серверные/частые команды)
+-- ГЁГ¬ГҐГ­Г , ГЄГ®ГІГ®Г°Г»ГҐ ГЎГЁГ­Г¤ Г§Г Г­ГЁГ¬Г ГІГј Г­ГҐ Г¤Г®Г«Г¦ГҐГ­ (Г±ГҐГ°ГўГҐГ°Г­Г»ГҐ/Г·Г Г±ГІГ»ГҐ ГЄГ®Г¬Г Г­Г¤Г»)
 local BIND_RESERVED = {}
 for n in ("a o aad pm re rep report me do b s w g c pay mp setstat ban kick jail mute warn q quit save rcon login register"):gmatch("%S+") do BIND_RESERVED[n] = true end
 
@@ -119,7 +119,7 @@ local function saveBinds()
         end
         f:close()
     end)
-    if not ok then bmsg("Не удалось сохранить биндер в файл!") end
+    if not ok then bmsg("ГЌГҐ ГіГ¤Г Г«Г®Г±Гј Г±Г®ГµГ°Г Г­ГЁГІГј ГЎГЁГ­Г¤ГҐГ° Гў ГґГ Г©Г«!") end
 end
 
 local function runBind(name, arg)
@@ -131,7 +131,7 @@ local function runBind(name, arg)
     for i, l in ipairs(b.lines) do
         lines[i] = l:gsub("{id}", function() return param end):gsub("{arg}", function() return arg end)
     end
-    if bindRunning then bmsg("Дождитесь окончания предыдущего бинда.") return end
+    if bindRunning then bmsg("Г„Г®Г¦Г¤ГЁГІГҐГ±Гј Г®ГЄГ®Г­Г·Г Г­ГЁГї ГЇГ°ГҐГ¤Г»Г¤ГіГ№ГҐГЈГ® ГЎГЁГ­Г¤Г .") return end
     bindRunning = true
     sendSeq(lines, b.delay, function() bindRunning = false end)
 end
@@ -169,30 +169,30 @@ local function loadBinds()
 end
 
 local function bindHelp()
-    sampShowDialog(4109, "FH | Биндер",
-        "{66CCFF}[ СВОЙ БИНДЕР ]\n\n{33CC33}/fbind {FFFFFF}- отдельное окно биндера (создание и правка без команд).\n\n" ..
-        "{FFFFFF}Создаёт свои команды: набрали {FFFF00}/имя{FFFFFF} -- отправились все строки бинда по очереди.\n\n" ..
-        "{66CCFF}/bnd add имя текст {FFFFFF}- создать бинд / добавить строку.\n" ..
-        "{FFFFFF}  Несколько строк сразу разделяйте {FFFF00};;{FFFFFF}, например:\n" ..
-        "{FFFF00}  /bnd add hi /aad Привет! ;; /aad Как дела?\n" ..
-        "{66CCFF}/bnd rm имя N {FFFFFF}- удалить строку N.\n" ..
-        "{66CCFF}/bnd del имя {FFFFFF}- удалить бинд целиком.\n" ..
-        "{66CCFF}/bnd delay имя мс {FFFFFF}- пауза между строками (300-10000, по умолчанию 1100).\n" ..
-        "{66CCFF}/bnd show имя {FFFFFF}- показать строки бинда.\n" ..
-        "{66CCFF}/bnd list {FFFFFF}- список всех биндов.\n\n" ..
-        "{9933FF}Подстановки в тексте: {FFFF00}{id}{FFFFFF} - ID из команды (/имя 12) или ID из /re,\n" ..
-        "{FFFF00}{arg}{FFFFFF} - всё, что написано после команды.\n" ..
-        "{9933FF}Имя: латиница, цифры и _ (до 20 символов). Лимит: " .. BIND_MAX .. " биндов по " .. BIND_LINES .. " строк.",
-        "Закрыть", "", 0)
+    sampShowDialog(4109, "FH | ГЃГЁГ­Г¤ГҐГ°",
+        "{66CCFF}[ Г‘Г‚ГЋГ‰ ГЃГ€ГЌГ„Г…Гђ ]\n\n{33CC33}/fbind {FFFFFF}- Г®ГІГ¤ГҐГ«ГјГ­Г®ГҐ Г®ГЄГ­Г® ГЎГЁГ­Г¤ГҐГ°Г  (Г±Г®Г§Г¤Г Г­ГЁГҐ ГЁ ГЇГ°Г ГўГЄГ  ГЎГҐГ§ ГЄГ®Г¬Г Г­Г¤).\n\n" ..
+        "{FFFFFF}Г‘Г®Г§Г¤Г ВёГІ Г±ГўГ®ГЁ ГЄГ®Г¬Г Г­Г¤Г»: Г­Г ГЎГ°Г Г«ГЁ {FFFF00}/ГЁГ¬Гї{FFFFFF} -- Г®ГІГЇГ°Г ГўГЁГ«ГЁГ±Гј ГўГ±ГҐ Г±ГІГ°Г®ГЄГЁ ГЎГЁГ­Г¤Г  ГЇГ® Г®Г·ГҐГ°ГҐГ¤ГЁ.\n\n" ..
+        "{66CCFF}/bnd add ГЁГ¬Гї ГІГҐГЄГ±ГІ {FFFFFF}- Г±Г®Г§Г¤Г ГІГј ГЎГЁГ­Г¤ / Г¤Г®ГЎГ ГўГЁГІГј Г±ГІГ°Г®ГЄГі.\n" ..
+        "{FFFFFF}  ГЌГҐГ±ГЄГ®Г«ГјГЄГ® Г±ГІГ°Г®ГЄ Г±Г°Г Г§Гі Г°Г Г§Г¤ГҐГ«ГїГ©ГІГҐ {FFFF00};;{FFFFFF}, Г­Г ГЇГ°ГЁГ¬ГҐГ°:\n" ..
+        "{FFFF00}  /bnd add hi /aad ГЏГ°ГЁГўГҐГІ! ;; /aad ГЉГ ГЄ Г¤ГҐГ«Г ?\n" ..
+        "{66CCFF}/bnd rm ГЁГ¬Гї N {FFFFFF}- ГіГ¤Г Г«ГЁГІГј Г±ГІГ°Г®ГЄГі N.\n" ..
+        "{66CCFF}/bnd del ГЁГ¬Гї {FFFFFF}- ГіГ¤Г Г«ГЁГІГј ГЎГЁГ­Г¤ Г¶ГҐГ«ГЁГЄГ®Г¬.\n" ..
+        "{66CCFF}/bnd delay ГЁГ¬Гї Г¬Г± {FFFFFF}- ГЇГ ГіГ§Г  Г¬ГҐГ¦Г¤Гі Г±ГІГ°Г®ГЄГ Г¬ГЁ (300-10000, ГЇГ® ГіГ¬Г®Г«Г·Г Г­ГЁГѕ 1100).\n" ..
+        "{66CCFF}/bnd show ГЁГ¬Гї {FFFFFF}- ГЇГ®ГЄГ Г§Г ГІГј Г±ГІГ°Г®ГЄГЁ ГЎГЁГ­Г¤Г .\n" ..
+        "{66CCFF}/bnd list {FFFFFF}- Г±ГЇГЁГ±Г®ГЄ ГўГ±ГҐГµ ГЎГЁГ­Г¤Г®Гў.\n\n" ..
+        "{9933FF}ГЏГ®Г¤Г±ГІГ Г­Г®ГўГЄГЁ Гў ГІГҐГЄГ±ГІГҐ: {FFFF00}{id}{FFFFFF} - ID ГЁГ§ ГЄГ®Г¬Г Г­Г¤Г» (/ГЁГ¬Гї 12) ГЁГ«ГЁ ID ГЁГ§ /re,\n" ..
+        "{FFFF00}{arg}{FFFFFF} - ГўГ±Вё, Г·ГІГ® Г­Г ГЇГЁГ±Г Г­Г® ГЇГ®Г±Г«ГҐ ГЄГ®Г¬Г Г­Г¤Г».\n" ..
+        "{9933FF}Г€Г¬Гї: Г«Г ГІГЁГ­ГЁГ¶Г , Г¶ГЁГґГ°Г» ГЁ _ (Г¤Г® 20 Г±ГЁГ¬ГўГ®Г«Г®Гў). Г‹ГЁГ¬ГЁГІ: " .. BIND_MAX .. " ГЎГЁГ­Г¤Г®Гў ГЇГ® " .. BIND_LINES .. " Г±ГІГ°Г®ГЄ.",
+        "Г‡Г ГЄГ°Г»ГІГј", "", 0)
 end
 
 local function bindAdd(name, text)
-    if not name:match("^[%w_]+$") or #name > 20 then return false, "Имя: латиница, цифры и _ (до 20 символов)." end
+    if not name:match("^[%w_]+$") or #name > 20 then return false, "Г€Г¬Гї: Г«Г ГІГЁГ­ГЁГ¶Г , Г¶ГЁГґГ°Г» ГЁ _ (Г¤Г® 20 Г±ГЁГ¬ГўГ®Г«Г®Гў)." end
     name = name:lower()
-    if bindBuiltin[name] or BIND_RESERVED[name] then return false, "Имя /" .. name .. " занято командой хелпера." end
+    if bindBuiltin[name] or BIND_RESERVED[name] then return false, "Г€Г¬Гї /" .. name .. " Г§Г Г­ГїГІГ® ГЄГ®Г¬Г Г­Г¤Г®Г© ГµГҐГ«ГЇГҐГ°Г ." end
     local b = binds[name]
     if not b then
-        if #sortedBindNames() >= BIND_MAX then return false, "Достигнут лимит биндов: " .. BIND_MAX end
+        if #sortedBindNames() >= BIND_MAX then return false, "Г„Г®Г±ГІГЁГЈГ­ГіГІ Г«ГЁГ¬ГЁГІ ГЎГЁГ­Г¤Г®Гў: " .. BIND_MAX end
         b = { delay = SEND_GAP, lines = {} }
     end
     local added = 0
@@ -204,10 +204,10 @@ local function bindAdd(name, text)
             added = added + 1
         end
     end
-    if added == 0 then return false, "Ничего не добавлено (пустой текст или лимит строк " .. BIND_LINES .. ")." end
+    if added == 0 then return false, "ГЌГЁГ·ГҐГЈГ® Г­ГҐ Г¤Г®ГЎГ ГўГ«ГҐГ­Г® (ГЇГіГ±ГІГ®Г© ГІГҐГЄГ±ГІ ГЁГ«ГЁ Г«ГЁГ¬ГЁГІ Г±ГІГ°Г®ГЄ " .. BIND_LINES .. ")." end
     if not binds[name] then binds[name] = b registerBind(name) end
     saveBinds()
-    return true, string.format("Бинд /%s: добавлено строк %d (всего %d).", name, added, #b.lines), name
+    return true, string.format("ГЃГЁГ­Г¤ /%s: Г¤Г®ГЎГ ГўГ«ГҐГ­Г® Г±ГІГ°Г®ГЄ %d (ГўГ±ГҐГЈГ® %d).", name, added, #b.lines), name
 end
 
 local function bindDelete(name)
@@ -217,7 +217,7 @@ local function bindDelete(name)
 end
 
 ----------------------------------------------------------------------
--- ОТДЕЛЬНОЕ ОКНО БИНДЕРА: /fbind (на диалогах SA-MP, работает без imgui)
+-- ГЋГ’Г„Г…Г‹ГњГЌГЋГ… ГЋГЉГЌГЋ ГЃГ€ГЌГ„Г…ГђГЂ: /fbind (Г­Г  Г¤ГЁГ Г«Г®ГЈГ Гµ SA-MP, Г°Г ГЎГ®ГІГ ГҐГІ ГЎГҐГ§ imgui)
 ----------------------------------------------------------------------
 local D_MAIN, D_NAME, D_ADD, D_BIND, D_LINES, D_DELAY, D_CONF, D_SHOW = 4110, 4111, 4112, 4113, 4114, 4115, 4116, 4117
 local ui = { open = nil, names = {}, sel = nil }
@@ -230,30 +230,30 @@ end
 
 local function uiMain()
     ui.names = sortedBindNames()
-    local t = { "{33CC33}[+] Создать новый бинд" }
+    local t = { "{33CC33}[+] Г‘Г®Г§Г¤Г ГІГј Г­Г®ГўГ»Г© ГЎГЁГ­Г¤" }
     for _, n in ipairs(ui.names) do
-        t[#t + 1] = string.format("{FFFFFF}/%s {A9A9A9}- строк: %d, пауза %d мс", n, #binds[n].lines, binds[n].delay)
+        t[#t + 1] = string.format("{FFFFFF}/%s {A9A9A9}- Г±ГІГ°Г®ГЄ: %d, ГЇГ ГіГ§Г  %d Г¬Г±", n, #binds[n].lines, binds[n].delay)
     end
-    uiShow(D_MAIN, "FH | Биндер", table.concat(t, "\n"), "Выбрать", "Закрыть", 2)
+    uiShow(D_MAIN, "FH | ГЃГЁГ­Г¤ГҐГ°", table.concat(t, "\n"), "Г‚Г»ГЎГ°Г ГІГј", "Г‡Г ГЄГ°Г»ГІГј", 2)
 end
 
 local function uiBind()
     if not binds[ui.sel] then return uiMain() end
-    uiShow(D_BIND, "Бинд /" .. ui.sel,
-        "Запустить\nПоказать строки\nДобавить строки\nУдалить строку\nИзменить паузу\n{FF3333}Удалить бинд\nНазад",
-        "Выбрать", "Закрыть", 2)
+    uiShow(D_BIND, "ГЃГЁГ­Г¤ /" .. ui.sel,
+        "Г‡Г ГЇГіГ±ГІГЁГІГј\nГЏГ®ГЄГ Г§Г ГІГј Г±ГІГ°Г®ГЄГЁ\nГ„Г®ГЎГ ГўГЁГІГј Г±ГІГ°Г®ГЄГЁ\nГ“Г¤Г Г«ГЁГІГј Г±ГІГ°Г®ГЄГі\nГ€Г§Г¬ГҐГ­ГЁГІГј ГЇГ ГіГ§Гі\n{FF3333}Г“Г¤Г Г«ГЁГІГј ГЎГЁГ­Г¤\nГЌГ Г§Г Г¤",
+        "Г‚Г»ГЎГ°Г ГІГј", "Г‡Г ГЄГ°Г»ГІГј", 2)
 end
 
 local function uiAddPrompt()
-    uiShow(D_ADD, "Бинд /" .. ui.sel .. " | Добавить строки",
-        "Введите текст строки (команда или сообщение).\nНесколько строк сразу разделяйте {FFFF00};;\n{A9A9A9}Подстановки: {id} - ID, {arg} - текст после команды.",
-        "Добавить", "Назад", 1)
+    uiShow(D_ADD, "ГЃГЁГ­Г¤ /" .. ui.sel .. " | Г„Г®ГЎГ ГўГЁГІГј Г±ГІГ°Г®ГЄГЁ",
+        "Г‚ГўГҐГ¤ГЁГІГҐ ГІГҐГЄГ±ГІ Г±ГІГ°Г®ГЄГЁ (ГЄГ®Г¬Г Г­Г¤Г  ГЁГ«ГЁ Г±Г®Г®ГЎГ№ГҐГ­ГЁГҐ).\nГЌГҐГ±ГЄГ®Г«ГјГЄГ® Г±ГІГ°Г®ГЄ Г±Г°Г Г§Гі Г°Г Г§Г¤ГҐГ«ГїГ©ГІГҐ {FFFF00};;\n{A9A9A9}ГЏГ®Г¤Г±ГІГ Г­Г®ГўГЄГЁ: {id} - ID, {arg} - ГІГҐГЄГ±ГІ ГЇГ®Г±Г«ГҐ ГЄГ®Г¬Г Г­Г¤Г».",
+        "Г„Г®ГЎГ ГўГЁГІГј", "ГЌГ Г§Г Г¤", 1)
 end
 
 uiHandlers[D_MAIN] = function(button, list)
     if button == 0 then return end
     if list == 0 then
-        uiShow(D_NAME, "Новый бинд", "Введите имя команды (латиница, цифры, _):", "Далее", "Назад", 1)
+        uiShow(D_NAME, "ГЌГ®ГўГ»Г© ГЎГЁГ­Г¤", "Г‚ГўГҐГ¤ГЁГІГҐ ГЁГ¬Гї ГЄГ®Г¬Г Г­Г¤Г» (Г«Г ГІГЁГ­ГЁГ¶Г , Г¶ГЁГґГ°Г», _):", "Г„Г Г«ГҐГҐ", "ГЌГ Г§Г Г¤", 1)
     else
         ui.sel = ui.names[list]
         uiBind()
@@ -264,12 +264,12 @@ uiHandlers[D_NAME] = function(button, _, input)
     if button == 0 then return uiMain() end
     local name = trim(input):lower()
     if not name:match("^[%w_]+$") or #name > 20 then
-        bmsg("Имя: латиница, цифры и _ (до 20 символов).")
-        return uiShow(D_NAME, "Новый бинд", "{FF3333}Неверное имя!\n{FFFFFF}Латиница, цифры, _ (до 20 символов):", "Далее", "Назад", 1)
+        bmsg("Г€Г¬Гї: Г«Г ГІГЁГ­ГЁГ¶Г , Г¶ГЁГґГ°Г» ГЁ _ (Г¤Г® 20 Г±ГЁГ¬ГўГ®Г«Г®Гў).")
+        return uiShow(D_NAME, "ГЌГ®ГўГ»Г© ГЎГЁГ­Г¤", "{FF3333}ГЌГҐГўГҐГ°Г­Г®ГҐ ГЁГ¬Гї!\n{FFFFFF}Г‹Г ГІГЁГ­ГЁГ¶Г , Г¶ГЁГґГ°Г», _ (Г¤Г® 20 Г±ГЁГ¬ГўГ®Г«Г®Гў):", "Г„Г Г«ГҐГҐ", "ГЌГ Г§Г Г¤", 1)
     end
     if bindBuiltin[name] or BIND_RESERVED[name] then
-        bmsg("Имя /" .. name .. " занято командой хелпера.")
-        return uiShow(D_NAME, "Новый бинд", "{FF3333}Имя занято командой хелпера!\n{FFFFFF}Введите другое:", "Далее", "Назад", 1)
+        bmsg("Г€Г¬Гї /" .. name .. " Г§Г Г­ГїГІГ® ГЄГ®Г¬Г Г­Г¤Г®Г© ГµГҐГ«ГЇГҐГ°Г .")
+        return uiShow(D_NAME, "ГЌГ®ГўГ»Г© ГЎГЁГ­Г¤", "{FF3333}Г€Г¬Гї Г§Г Г­ГїГІГ® ГЄГ®Г¬Г Г­Г¤Г®Г© ГµГҐГ«ГЇГҐГ°Г !\n{FFFFFF}Г‚ГўГҐГ¤ГЁГІГҐ Г¤Г°ГіГЈГ®ГҐ:", "Г„Г Г«ГҐГҐ", "ГЌГ Г§Г Г¤", 1)
     end
     ui.sel = name
     uiAddPrompt()
@@ -291,17 +291,17 @@ uiHandlers[D_BIND] = function(button, list)
     elseif list == 1 then
         local t = {}
         for i, l in ipairs(b.lines) do t[i] = string.format("{FFFF00}%d. {FFFFFF}%s", i, l) end
-        uiShow(D_SHOW, "Бинд /" .. ui.sel .. " | Строки", table.concat(t, "\n"), "Назад", "", 0)
+        uiShow(D_SHOW, "ГЃГЁГ­Г¤ /" .. ui.sel .. " | Г‘ГІГ°Г®ГЄГЁ", table.concat(t, "\n"), "ГЌГ Г§Г Г¤", "", 0)
     elseif list == 2 then uiAddPrompt()
     elseif list == 3 then
         local t = {}
         for i, l in ipairs(b.lines) do t[i] = i .. ". " .. l end
-        uiShow(D_LINES, "Бинд /" .. ui.sel .. " | Какую строку удалить?", table.concat(t, "\n"), "Удалить", "Назад", 2)
+        uiShow(D_LINES, "ГЃГЁГ­Г¤ /" .. ui.sel .. " | ГЉГ ГЄГіГѕ Г±ГІГ°Г®ГЄГі ГіГ¤Г Г«ГЁГІГј?", table.concat(t, "\n"), "Г“Г¤Г Г«ГЁГІГј", "ГЌГ Г§Г Г¤", 2)
     elseif list == 4 then
-        uiShow(D_DELAY, "Бинд /" .. ui.sel .. " | Пауза",
-            string.format("Пауза между строками в мс (300-10000).\nСейчас: %d", b.delay), "Готово", "Назад", 1)
+        uiShow(D_DELAY, "ГЃГЁГ­Г¤ /" .. ui.sel .. " | ГЏГ ГіГ§Г ",
+            string.format("ГЏГ ГіГ§Г  Г¬ГҐГ¦Г¤Гі Г±ГІГ°Г®ГЄГ Г¬ГЁ Гў Г¬Г± (300-10000).\nГ‘ГҐГ©Г·Г Г±: %d", b.delay), "ГѓГ®ГІГ®ГўГ®", "ГЌГ Г§Г Г¤", 1)
     elseif list == 5 then
-        uiShow(D_CONF, "Удаление бинда", "Удалить бинд /" .. ui.sel .. " целиком?", "Да", "Нет", 0)
+        uiShow(D_CONF, "Г“Г¤Г Г«ГҐГ­ГЁГҐ ГЎГЁГ­Г¤Г ", "Г“Г¤Г Г«ГЁГІГј ГЎГЁГ­Г¤ /" .. ui.sel .. " Г¶ГҐГ«ГЁГЄГ®Г¬?", "Г„Г ", "ГЌГҐГІ", 0)
     else uiMain() end
 end
 
@@ -313,11 +313,11 @@ uiHandlers[D_LINES] = function(button, list)
         table.remove(b.lines, list + 1)
         if #b.lines == 0 then
             bindDelete(ui.sel)
-            bmsg("Строк не осталось, бинд удалён.")
+            bmsg("Г‘ГІГ°Г®ГЄ Г­ГҐ Г®Г±ГІГ Г«Г®Г±Гј, ГЎГЁГ­Г¤ ГіГ¤Г Г«ВёГ­.")
             return uiMain()
         end
         saveBinds()
-        bmsg("Строка удалена.")
+        bmsg("Г‘ГІГ°Г®ГЄГ  ГіГ¤Г Г«ГҐГ­Г .")
     end
     uiBind()
 end
@@ -328,8 +328,8 @@ uiHandlers[D_DELAY] = function(button, _, input)
         if ms and ms >= 300 and ms <= 10000 then
             binds[ui.sel].delay = math.floor(ms)
             saveBinds()
-            bmsg(string.format("Пауза бинда /%s: %d мс.", ui.sel, ms))
-        else bmsg("Нужно число от 300 до 10000.") end
+            bmsg(string.format("ГЏГ ГіГ§Г  ГЎГЁГ­Г¤Г  /%s: %d Г¬Г±.", ui.sel, ms))
+        else bmsg("ГЌГіГ¦Г­Г® Г·ГЁГ±Г«Г® Г®ГІ 300 Г¤Г® 10000.") end
     end
     uiBind()
 end
@@ -337,13 +337,13 @@ end
 uiHandlers[D_CONF] = function(button)
     if button == 1 and binds[ui.sel] then
         bindDelete(ui.sel)
-        bmsg("Бинд /" .. ui.sel .. " удалён.")
+        bmsg("ГЃГЁГ­Г¤ /" .. ui.sel .. " ГіГ¤Г Г«ВёГ­.")
         return uiMain()
     end
     uiBind()
 end
 
--- вызывается из главного цикла
+-- ГўГ»Г§Г»ГўГ ГҐГІГ±Гї ГЁГ§ ГЈГ«Г ГўГ­Г®ГЈГ® Г¶ГЁГЄГ«Г 
 local function uiTick()
     local id = ui.open
     if id and sampHasDialogRespond(id) then
@@ -368,49 +368,49 @@ local function setupBinder(builtin, reg)
         local sub, rest = (param or ""):match("^(%S+)%s*(.*)$")
         if sub == "add" then
             local name, text = rest:match("^(%S+)%s+(.+)$")
-            if not name then bmsg("Использование: /bnd add имя текст") return end
+            if not name then bmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /bnd add ГЁГ¬Гї ГІГҐГЄГ±ГІ") return end
             local _, msg = bindAdd(name, text)
             bmsg(msg)
         elseif sub == "del" then
             local name = trim(rest):lower()
-            if not binds[name] then bmsg("Бинд не найден: " .. name) return end
+            if not binds[name] then bmsg("ГЃГЁГ­Г¤ Г­ГҐ Г­Г Г©Г¤ГҐГ­: " .. name) return end
             binds[name] = nil
             pcall(sampUnregisterChatCommand, name)
             saveBinds()
-            bmsg("Бинд /" .. name .. " удалён.")
+            bmsg("ГЃГЁГ­Г¤ /" .. name .. " ГіГ¤Г Г«ВёГ­.")
         elseif sub == "rm" then
             local name, n = rest:match("^(%S+)%s+(%d+)$")
             name = name and name:lower()
             local b = name and binds[name]
             n = tonumber(n)
-            if not b or not b.lines[n] then bmsg("Использование: /bnd rm имя N (номер строки из /bnd show)") return end
+            if not b or not b.lines[n] then bmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /bnd rm ГЁГ¬Гї N (Г­Г®Г¬ГҐГ° Г±ГІГ°Г®ГЄГЁ ГЁГ§ /bnd show)") return end
             table.remove(b.lines, n)
             if #b.lines == 0 then
                 binds[name] = nil
                 pcall(sampUnregisterChatCommand, name)
-                bmsg("Строк не осталось, бинд /" .. name .. " удалён.")
-            else bmsg("Строка " .. n .. " удалена.") end
+                bmsg("Г‘ГІГ°Г®ГЄ Г­ГҐ Г®Г±ГІГ Г«Г®Г±Гј, ГЎГЁГ­Г¤ /" .. name .. " ГіГ¤Г Г«ВёГ­.")
+            else bmsg("Г‘ГІГ°Г®ГЄГ  " .. n .. " ГіГ¤Г Г«ГҐГ­Г .") end
             saveBinds()
         elseif sub == "delay" then
             local name, ms = rest:match("^(%S+)%s+(%d+)$")
             name = name and name:lower()
             ms = tonumber(ms)
             if not name or not binds[name] or not ms or ms < 300 or ms > 10000 then
-                bmsg("Использование: /bnd delay имя мс (300-10000)") return
+                bmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /bnd delay ГЁГ¬Гї Г¬Г± (300-10000)") return
             end
             binds[name].delay = ms
             saveBinds()
-            bmsg(string.format("Пауза бинда /%s: %d мс.", name, ms))
+            bmsg(string.format("ГЏГ ГіГ§Г  ГЎГЁГ­Г¤Г  /%s: %d Г¬Г±.", name, ms))
         elseif sub == "show" then
             local name = trim(rest):lower()
             local b = binds[name]
-            if not b then bmsg("Бинд не найден: " .. name) return end
-            bmsg(string.format("/%s (пауза %d мс):", name, b.delay))
+            if not b then bmsg("ГЃГЁГ­Г¤ Г­ГҐ Г­Г Г©Г¤ГҐГ­: " .. name) return end
+            bmsg(string.format("/%s (ГЇГ ГіГ§Г  %d Г¬Г±):", name, b.delay))
             for i, l in ipairs(b.lines) do sampAddChatMessage(string.format("{FFFF00}%d. {FFFFFF}%s", i, l), -1) end
         elseif sub == "list" then
             local names = sortedBindNames()
-            if #names == 0 then bmsg("Биндов пока нет. Справка: /binder") return end
-            bmsg("Ваши бинды: /" .. table.concat(names, ", /"))
+            if #names == 0 then bmsg("ГЃГЁГ­Г¤Г®Гў ГЇГ®ГЄГ  Г­ГҐГІ. Г‘ГЇГ°Г ГўГЄГ : /binder") return end
+            bmsg("Г‚Г ГёГЁ ГЎГЁГ­Г¤Г»: /" .. table.concat(names, ", /"))
         else
             bindHelp()
         end
@@ -419,25 +419,25 @@ end
 
 
 ----------------------------------------------------------------------
--- НАСТРОЙКИ, ШАБЛОНЫ ОТВЕТОВ, АВТО-/mp
+-- ГЌГЂГ‘Г’ГђГЋГ‰ГЉГ€, ГГЂГЃГ‹ГЋГЌГ› ГЋГ’Г‚Г…Г’ГЋГ‚, ГЂГ‚Г’ГЋ-/mp
 ----------------------------------------------------------------------
-local LITE_DEFAULT = false   -- на ПК по умолчанию полный стиль
+local LITE_DEFAULT = false   -- Г­Г  ГЏГЉ ГЇГ® ГіГ¬Г®Г«Г·Г Г­ГЁГѕ ГЇГ®Г«Г­Г»Г© Г±ГІГЁГ«Гј
 local cfg = {
-    automp = true,                  -- после анонса МП вводить /mp и нажимать 1-ю строку
-    accent = { 0.26, 0.62, 0.96 },  -- цвет акцента окна
-    bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
-    alpha = 0.97,                   -- прозрачность фона
-    glass = true,                   -- стиль Liquid Glass (стекло)
-    tagmode = 0,                    -- метка над игроком: 0 - imgui, 1 - render (запасной)
-    autoupd = true,                 -- проверять обновления при запуске
-    reptoast = true,                -- овальное уведомление о репорте
-    intro = true,                   -- анимация открытия окна (только при первом запуске)
-    introDone = false,              -- анимация уже показана
-    lite = LITE_DEFAULT,            -- лёгкий режим: без бликов и прозрачности (меньше лагов)
+    automp = true,                  -- ГЇГ®Г±Г«ГҐ Г Г­Г®Г­Г±Г  ГЊГЏ ГўГўГ®Г¤ГЁГІГј /mp ГЁ Г­Г Г¦ГЁГ¬Г ГІГј 1-Гѕ Г±ГІГ°Г®ГЄГі
+    accent = { 0.26, 0.62, 0.96 },  -- Г¶ГўГҐГІ Г ГЄГ¶ГҐГ­ГІГ  Г®ГЄГ­Г 
+    bg = { 0.07, 0.08, 0.10 },      -- Г¶ГўГҐГІ ГґГ®Г­Г  Г®ГЄГ­Г 
+    alpha = 0.97,                   -- ГЇГ°Г®Г§Г°Г Г·Г­Г®Г±ГІГј ГґГ®Г­Г 
+    glass = true,                   -- Г±ГІГЁГ«Гј Liquid Glass (Г±ГІГҐГЄГ«Г®)
+    tagmode = 2,                    -- Г¬ГҐГІГЄГ  Г­Г Г¤ ГЁГЈГ°Г®ГЄГ®Г¬: 0 - imgui, 1 - render (Г§Г ГЇГ Г±Г­Г®Г©)
+    autoupd = true,                 -- ГЇГ°Г®ГўГҐГ°ГїГІГј Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГї ГЇГ°ГЁ Г§Г ГЇГіГ±ГЄГҐ
+    reptoast = true,                -- Г®ГўГ Г«ГјГ­Г®ГҐ ГіГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГҐ Г® Г°ГҐГЇГ®Г°ГІГҐ
+    intro = true,                   -- Г Г­ГЁГ¬Г Г¶ГЁГї Г®ГІГЄГ°Г»ГІГЁГї Г®ГЄГ­Г  (ГІГ®Г«ГјГЄГ® ГЇГ°ГЁ ГЇГҐГ°ГўГ®Г¬ Г§Г ГЇГіГ±ГЄГҐ)
+    introDone = false,              -- Г Г­ГЁГ¬Г Г¶ГЁГї ГіГ¦ГҐ ГЇГ®ГЄГ Г§Г Г­Г 
+    lite = LITE_DEFAULT,            -- Г«ВёГЈГЄГЁГ© Г°ГҐГ¦ГЁГ¬: ГЎГҐГ§ ГЎГ«ГЁГЄГ®Гў ГЁ ГЇГ°Г®Г§Г°Г Г·Г­Г®Г±ГІГЁ (Г¬ГҐГ­ГјГёГҐ Г«Г ГЈГ®Гў)
     aiUrl = "https://api.openai.com/v1/chat/completions",
     aiKey = "",
     aiModel = "gpt-4o-mini",
-    aiPrompt = "Ты помощник администратора SA-MP сервера. Ответь игроку на репорт вежливо и по делу одним коротким сообщением (до 100 символов), без markdown. Если данных мало - попроси уточнить ID нарушителя. Не выдумывай правила и не обещай наказаний.",
+    aiPrompt = "Г’Г» ГЇГ®Г¬Г®Г№Г­ГЁГЄ Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Г  SA-MP Г±ГҐГ°ГўГҐГ°Г . ГЋГІГўГҐГІГј ГЁГЈГ°Г®ГЄГі Г­Г  Г°ГҐГЇГ®Г°ГІ ГўГҐГ¦Г«ГЁГўГ® ГЁ ГЇГ® Г¤ГҐГ«Гі Г®Г¤Г­ГЁГ¬ ГЄГ®Г°Г®ГІГЄГЁГ¬ Г±Г®Г®ГЎГ№ГҐГ­ГЁГҐГ¬ (Г¤Г® 100 Г±ГЁГ¬ГўГ®Г«Г®Гў), ГЎГҐГ§ markdown. Г…Г±Г«ГЁ Г¤Г Г­Г­Г»Гµ Г¬Г Г«Г® - ГЇГ®ГЇГ°Г®Г±ГЁ ГіГІГ®Г·Г­ГЁГІГј ID Г­Г Г°ГіГёГЁГІГҐГ«Гї. ГЌГҐ ГўГ»Г¤ГіГ¬Г»ГўГ Г© ГЇГ°Г ГўГЁГ«Г  ГЁ Г­ГҐ Г®ГЎГҐГ№Г Г© Г­Г ГЄГ Г§Г Г­ГЁГ©.",
 }
 
 local function configDir()
@@ -496,17 +496,17 @@ local function loadCfg()
     if not ok then print("[FH] settings load error: " .. tostring(err)) end
 end
 
--- Шаблоны ответов на репорты
+-- ГГ ГЎГ«Г®Г­Г» Г®ГІГўГҐГІГ®Гў Г­Г  Г°ГҐГЇГ®Г°ГІГ»
 local templates = {}
 local TPL_MAX, TPL_LEN = 30, 120
 local DEFAULT_TEMPLATES = {
-    "Здравствуйте! Ваша жалоба принята, разбираемся.",
-    "Передано на рассмотрение старшей администрации.",
-    "Уточните, пожалуйста: ID нарушителя и что произошло.",
-    "Нарушений не обнаружено.",
-    "Игрок наказан, спасибо за обращение!",
-    "С таким вопросом обратитесь на форум проекта.",
-    "Приятной игры на нашем сервере!",
+    "Г‡Г¤Г°Г ГўГ±ГІГўГіГ©ГІГҐ! Г‚Г ГёГ  Г¦Г Г«Г®ГЎГ  ГЇГ°ГЁГ­ГїГІГ , Г°Г Г§ГЎГЁГ°Г ГҐГ¬Г±Гї.",
+    "ГЏГҐГ°ГҐГ¤Г Г­Г® Г­Г  Г°Г Г±Г±Г¬Г®ГІГ°ГҐГ­ГЁГҐ Г±ГІГ Г°ГёГҐГ© Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г Г¶ГЁГЁ.",
+    "Г“ГІГ®Г·Г­ГЁГІГҐ, ГЇГ®Г¦Г Г«ГіГ©Г±ГІГ : ID Г­Г Г°ГіГёГЁГІГҐГ«Гї ГЁ Г·ГІГ® ГЇГ°Г®ГЁГ§Г®ГёГ«Г®.",
+    "ГЌГ Г°ГіГёГҐГ­ГЁГ© Г­ГҐ Г®ГЎГ­Г Г°ГіГ¦ГҐГ­Г®.",
+    "Г€ГЈГ°Г®ГЄ Г­Г ГЄГ Г§Г Г­, Г±ГЇГ Г±ГЁГЎГ® Г§Г  Г®ГЎГ°Г Г№ГҐГ­ГЁГҐ!",
+    "Г‘ ГІГ ГЄГЁГ¬ ГўГ®ГЇГ°Г®Г±Г®Г¬ Г®ГЎГ°Г ГІГЁГІГҐГ±Гј Г­Г  ГґГ®Г°ГіГ¬ ГЇГ°Г®ГҐГЄГІГ .",
+    "ГЏГ°ГЁГїГІГ­Г®Г© ГЁГЈГ°Г» Г­Г  Г­Г ГёГҐГ¬ Г±ГҐГ°ГўГҐГ°ГҐ!",
 }
 
 local function saveTemplates()
@@ -536,14 +536,14 @@ end
 
 local function tplAdd(text)
     text = trim((text or ""):gsub("%c", " "))
-    if text == "" then return false, "Пустой шаблон." end
-    if #templates >= TPL_MAX then return false, "Лимит шаблонов: " .. TPL_MAX end
+    if text == "" then return false, "ГЏГіГ±ГІГ®Г© ГёГ ГЎГ«Г®Г­." end
+    if #templates >= TPL_MAX then return false, "Г‹ГЁГ¬ГЁГІ ГёГ ГЎГ«Г®Г­Г®Гў: " .. TPL_MAX end
     templates[#templates + 1] = text:sub(1, TPL_LEN)
     saveTemplates()
-    return true, "Шаблон добавлен (всего " .. #templates .. ")."
+    return true, "ГГ ГЎГ«Г®Г­ Г¤Г®ГЎГ ГўГ«ГҐГ­ (ГўГ±ГҐГЈГ® " .. #templates .. ")."
 end
 
--- Авто-/mp: ввести /mp и нажать первую строку открывшегося списка
+-- ГЂГўГІГ®-/mp: ГўГўГҐГ±ГІГЁ /mp ГЁ Г­Г Г¦Г ГІГј ГЇГҐГ°ГўГіГѕ Г±ГІГ°Г®ГЄГі Г®ГІГЄГ°Г»ГўГёГҐГЈГ®Г±Гї Г±ГЇГЁГ±ГЄГ 
 local autoMp = { armed = false, t0 = 0 }
 local function armAutoMp(force)
     if not force and not cfg.automp then return end
@@ -552,10 +552,10 @@ local function armAutoMp(force)
 end
 
 ----------------------------------------------------------------------
--- СПИСОК РЕПОРТОВ ИЗ /define
--- /rpl (или кнопка в /fh) шлёт /define, перехватывает диалог со списком,
--- разбирает его и заменяет им список репортов. Сам диалог не показывается.
--- Сырой текст диалога сохраняется в config/FilippHelper_define.txt.
+-- Г‘ГЏГ€Г‘ГЋГЉ ГђГ…ГЏГЋГђГ’ГЋГ‚ Г€Г‡ /define
+-- /rpl (ГЁГ«ГЁ ГЄГ­Г®ГЇГЄГ  Гў /fh) ГёГ«ВёГІ /define, ГЇГҐГ°ГҐГµГўГ ГІГ»ГўГ ГҐГІ Г¤ГЁГ Г«Г®ГЈ Г±Г® Г±ГЇГЁГ±ГЄГ®Г¬,
+-- Г°Г Г§ГЎГЁГ°Г ГҐГІ ГҐГЈГ® ГЁ Г§Г Г¬ГҐГ­ГїГҐГІ ГЁГ¬ Г±ГЇГЁГ±Г®ГЄ Г°ГҐГЇГ®Г°ГІГ®Гў. Г‘Г Г¬ Г¤ГЁГ Г«Г®ГЈ Г­ГҐ ГЇГ®ГЄГ Г§Г»ГўГ ГҐГІГ±Гї.
+-- Г‘Г»Г°Г®Г© ГІГҐГЄГ±ГІ Г¤ГЁГ Г«Г®ГЈГ  Г±Г®ГµГ°Г Г­ГїГҐГІГ±Гї Гў config/FilippHelper_define.txt.
 ----------------------------------------------------------------------
 local DEF = { waiting = false, t0 = 0, user = nil, token = 0 }
 
@@ -570,7 +570,7 @@ local function defineParse(text)
     return list
 end
 
--- вызывается из onShowDialog; ours - диалог вызван нашим запросом (его прячем)
+-- ГўГ»Г§Г»ГўГ ГҐГІГ±Гї ГЁГ§ onShowDialog; ours - Г¤ГЁГ Г«Г®ГЈ ГўГ»Г§ГўГ Г­ Г­Г ГёГЁГ¬ Г§Г ГЇГ°Г®Г±Г®Г¬ (ГҐГЈГ® ГЇГ°ГїГ·ГҐГ¬)
 function DEF.onDialog(id, title, text, ours)
     DEF.waiting = false
     pcall(function()
@@ -579,11 +579,11 @@ function DEF.onDialog(id, title, text, ours)
     end)
     local list = defineParse(fromGame(tostring(text or "")))
     if #list == 0 then
-        fmsg("Не удалось разобрать /define. Формат записан в config/FilippHelper_define.txt - пришлите этот файл разработчику.")
+        fmsg("ГЌГҐ ГіГ¤Г Г«Г®Г±Гј Г°Г Г§Г®ГЎГ°Г ГІГј /define. Г”Г®Г°Г¬Г ГІ Г§Г ГЇГЁГ±Г Г­ Гў config/FilippHelper_define.txt - ГЇГ°ГЁГёГ«ГЁГІГҐ ГЅГІГ®ГІ ГґГ Г©Г« Г°Г Г§Г°Г ГЎГ®ГІГ·ГЁГЄГі.")
     else
         for i = #reports, 1, -1 do reports[i] = nil end
         for _, r in ipairs(list) do reports[#reports + 1] = r end
-        fmsg("Список репортов обновлён из /define: " .. #list .. ".")
+        fmsg("Г‘ГЇГЁГ±Г®ГЄ Г°ГҐГЇГ®Г°ГІГ®Гў Г®ГЎГ­Г®ГўГ«ВёГ­ ГЁГ§ /define: " .. #list .. ".")
     end
     if ours then
         lua_thread.create(function() wait(100) pcall(sampSendDialogResponse, id, 0, -1, "") end)
@@ -601,12 +601,12 @@ function DEF.refresh()
         wait(5000)
         if DEF.waiting and DEF.token == my then
             DEF.waiting = false
-            fmsg("/define не ответил (нет доступа или другой формат).")
+            fmsg("/define Г­ГҐ Г®ГІГўГҐГІГЁГ« (Г­ГҐГІ Г¤Г®Г±ГІГіГЇГ  ГЁГ«ГЁ Г¤Г°ГіГЈГ®Г© ГґГ®Г°Г¬Г ГІ).")
         end
     end)
 end
 
--- подбирает пункт списка причин от сервера по словам из нашей причины
+-- ГЇГ®Г¤ГЎГЁГ°Г ГҐГІ ГЇГіГ­ГЄГІ Г±ГЇГЁГ±ГЄГ  ГЇГ°ГЁГ·ГЁГ­ Г®ГІ Г±ГҐГ°ГўГҐГ°Г  ГЇГ® Г±Г«Г®ГўГ Г¬ ГЁГ§ Г­Г ГёГҐГ© ГЇГ°ГЁГ·ГЁГ­Г»
 function PUN.handle(id, style, text)
     local p = PUN.pending
     if not p then return false end
@@ -636,7 +636,7 @@ function PUN.handle(id, style, text)
     if not best then return false end
     PUN.pending = nil
     lua_thread.create(function() wait(150) pcall(sampSendDialogResponse, id, 1, idx, "") end)
-    fmsg("Причина выбрана: " .. trim(best))
+    fmsg("ГЏГ°ГЁГ·ГЁГ­Г  ГўГ»ГЎГ°Г Г­Г : " .. trim(best))
     return true
 end
 
@@ -650,7 +650,7 @@ function ev.onShowDialog(id, style, title, b1, b2, text)
     end
     if not autoMp.armed then return end
     if os.clock() - autoMp.t0 > 6 then autoMp.armed = false return end
-    if style ~= 2 and style ~= 4 and style ~= 5 then return end   -- только списки
+    if style ~= 2 and style ~= 4 and style ~= 5 then return end   -- ГІГ®Г«ГјГЄГ® Г±ГЇГЁГ±ГЄГЁ
     autoMp.armed = false
     lua_thread.create(function()
         wait(150)
@@ -663,7 +663,7 @@ loadCfg()
 loadTemplates()
 
 ----------------------------------------------------------------------
--- РЕПОРТЫ: журнал последних обращений и быстрый ответ
+-- ГђГ…ГЏГЋГђГ’Г›: Г¦ГіГ°Г­Г Г« ГЇГ®Г±Г«ГҐГ¤Г­ГЁГµ Г®ГЎГ°Г Г№ГҐГ­ГЁГ© ГЁ ГЎГ»Г±ГІГ°Г»Г© Г®ГІГўГҐГІ
 ----------------------------------------------------------------------
 local D_MENU, D_RLIST, D_RREPLY, D_GWSTART = 4120, 4121, 4122, 4123
 
@@ -675,8 +675,8 @@ local function replyTo(id, text)
 end
 
 ----------------------------------------------------------------------
--- ИИ-ПОДСКАЗКА ОТВЕТА НА РЕПОРТ (любой сервис с OpenAI-совместимым API)
--- Нужны библиотеки effil и requests. Ключ хранится только в config/FilippHelper_settings.txt.
+-- Г€Г€-ГЏГЋГ„Г‘ГЉГЂГ‡ГЉГЂ ГЋГ’Г‚Г…Г’ГЂ ГЌГЂ ГђГ…ГЏГЋГђГ’ (Г«ГѕГЎГ®Г© Г±ГҐГ°ГўГЁГ± Г± OpenAI-Г±Г®ГўГ¬ГҐГ±ГІГЁГ¬Г»Г¬ API)
+-- ГЌГіГ¦Г­Г» ГЎГЁГЎГ«ГЁГ®ГІГҐГЄГЁ effil ГЁ requests. ГЉГ«ГѕГ· ГµГ°Г Г­ГЁГІГ±Гї ГІГ®Г«ГјГЄГ® Гў config/FilippHelper_settings.txt.
 ----------------------------------------------------------------------
 local AI = { busy = false, status = "", result = nil }
 
@@ -687,7 +687,7 @@ local function aiClean(text)
     return trim(text)
 end
 
--- мини-JSON на случай, если в загрузчике нет encodeJson/decodeJson
+-- Г¬ГЁГ­ГЁ-JSON Г­Г  Г±Г«ГіГ·Г Г©, ГҐГ±Г«ГЁ Гў Г§Г ГЈГ°ГіГ§Г·ГЁГЄГҐ Г­ГҐГІ encodeJson/decodeJson
 local function u8char(cp)
     if cp < 0x80 then return string.char(cp)
     elseif cp < 0x800 then return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64)
@@ -778,8 +778,8 @@ function AI.jsonDecode(s)
     return val()
 end
 
--- отправка POST-запроса; вызывается из потока lua_thread. Возвращает код, текст или nil, ошибка.
--- Перебираем способы: effil+requests (без подвисаний) -> requests -> ssl.https -> curl.
+-- Г®ГІГЇГ°Г ГўГЄГ  POST-Г§Г ГЇГ°Г®Г±Г ; ГўГ»Г§Г»ГўГ ГҐГІГ±Гї ГЁГ§ ГЇГ®ГІГ®ГЄГ  lua_thread. Г‚Г®Г§ГўГ°Г Г№Г ГҐГІ ГЄГ®Г¤, ГІГҐГЄГ±ГІ ГЁГ«ГЁ nil, Г®ГёГЁГЎГЄГ .
+-- ГЏГҐГ°ГҐГЎГЁГ°Г ГҐГ¬ Г±ГЇГ®Г±Г®ГЎГ»: effil+requests (ГЎГҐГ§ ГЇГ®Г¤ГўГЁГ±Г Г­ГЁГ©) -> requests -> ssl.https -> curl.
 function AI.http(url, key, body, method)
     method = method or "POST"
     body = body or ""
@@ -807,8 +807,8 @@ function AI.http(url, key, body, method)
         while true do
             local st = h:status()
             if st == "completed" then break end
-            if st == "failed" or st == "canceled" then return nil, "запрос не выполнен" end
-            if os.clock() - t0 > 40 then pcall(function() h:cancel() end) return nil, "таймаут ответа (40 с)" end
+            if st == "failed" or st == "canceled" then return nil, "Г§Г ГЇГ°Г®Г± Г­ГҐ ГўГ»ГЇГ®Г«Г­ГҐГ­" end
+            if os.clock() - t0 > 40 then pcall(function() h:cancel() end) return nil, "ГІГ Г©Г¬Г ГіГІ Г®ГІГўГҐГІГ  (40 Г±)" end
             wait(100)
         end
         return h:get()
@@ -858,13 +858,13 @@ function AI.http(url, key, body, method)
             pcall(os.remove, tmp)
         end
     end
-    return nil, "нет способа отправить запрос (нужны effil+requests, ssl.https или curl). Команда /aidiag покажет, что есть"
+    return nil, "Г­ГҐГІ Г±ГЇГ®Г±Г®ГЎГ  Г®ГІГЇГ°Г ГўГЁГІГј Г§Г ГЇГ°Г®Г± (Г­ГіГ¦Г­Г» effil+requests, ssl.https ГЁГ«ГЁ curl). ГЉГ®Г¬Г Г­Г¤Г  /aidiag ГЇГ®ГЄГ Г¦ГҐГІ, Г·ГІГ® ГҐГ±ГІГј"
 end
 
--- запрос в отдельном потоке; cb(ok, текст_или_ошибка) вызывается из этого потока
+-- Г§Г ГЇГ°Г®Г± Гў Г®ГІГ¤ГҐГ«ГјГ­Г®Г¬ ГЇГ®ГІГ®ГЄГҐ; cb(ok, ГІГҐГЄГ±ГІ_ГЁГ«ГЁ_Г®ГёГЁГЎГЄГ ) ГўГ»Г§Г»ГўГ ГҐГІГ±Гї ГЁГ§ ГЅГІГ®ГЈГ® ГЇГ®ГІГ®ГЄГ 
 function AI.ask(system, user, cb)
-    if AI.busy then cb(false, "предыдущий запрос ещё идёт") return end
-    if not AI.ready() then cb(false, "не заполнены адрес API и ключ (/fh - Настройки или /aiset)") return end
+    if AI.busy then cb(false, "ГЇГ°ГҐГ¤Г»Г¤ГіГ№ГЁГ© Г§Г ГЇГ°Г®Г± ГҐГ№Вё ГЁГ¤ВёГІ") return end
+    if not AI.ready() then cb(false, "Г­ГҐ Г§Г ГЇГ®Г«Г­ГҐГ­Г» Г Г¤Г°ГҐГ± API ГЁ ГЄГ«ГѕГ· (/fh - ГЌГ Г±ГІГ°Г®Г©ГЄГЁ ГЁГ«ГЁ /aiset)") return end
     AI.busy = true
     lua_thread.create(function()
         local ok, a, b = pcall(function()
@@ -877,16 +877,16 @@ function AI.ask(system, user, cb)
                 },
             })
             local url = trim(cfg.aiUrl):gsub("/+$", "")
-            if url:match("/v1$") then url = url .. "/chat/completions" end   -- адрес вида .../v1 дополняем сами
+            if url:match("/v1$") then url = url .. "/chat/completions" end   -- Г Г¤Г°ГҐГ± ГўГЁГ¤Г  .../v1 Г¤Г®ГЇГ®Г«Г­ГїГҐГ¬ Г±Г Г¬ГЁ
             local code, text = AI.http(url, trim(cfg.aiKey), body)
             if not code then return false, text end
-            if code == 0 then return false, "нет связи: " .. tostring(text):sub(1, 80) end
+            if code == 0 then return false, "Г­ГҐГІ Г±ГўГїГ§ГЁ: " .. tostring(text):sub(1, 80) end
             local okJ, data = pcall(dec, text)
-            if not okJ or type(data) ~= "table" then return false, "ответ не JSON (код " .. tostring(code) .. ")" end
+            if not okJ or type(data) ~= "table" then return false, "Г®ГІГўГҐГІ Г­ГҐ JSON (ГЄГ®Г¤ " .. tostring(code) .. ")" end
             if type(data.error) == "table" and data.error.message then return false, "API: " .. tostring(data.error.message):sub(1, 100) end
             local msg = data.choices and data.choices[1] and data.choices[1].message
             local content = msg and msg.content
-            if type(content) ~= "string" or content == "" then return false, "пустой ответ (код " .. tostring(code) .. ")" end
+            if type(content) ~= "string" or content == "" then return false, "ГЇГіГ±ГІГ®Г© Г®ГІГўГҐГІ (ГЄГ®Г¤ " .. tostring(code) .. ")" end
             return true, aiClean(fromUi(content))
         end)
         AI.busy = false
@@ -895,45 +895,45 @@ function AI.ask(system, user, cb)
     end)
 end
 
--- /aidiag: что доступно в загрузчике для запросов к API
+-- /aidiag: Г·ГІГ® Г¤Г®Г±ГІГіГЇГ­Г® Гў Г§Г ГЈГ°ГіГ§Г·ГЁГЄГҐ Г¤Г«Гї Г§Г ГЇГ°Г®Г±Г®Гў ГЄ API
 function AI.diag()
     local names = { "effil", "requests", "ssl.https", "ltn12", "socket", "copas", "cjson", "dkjson", "lib.requests" }
     local have, miss = {}, {}
     for _, n in ipairs(names) do
         if pcall(require, n) then have[#have + 1] = n else miss[#miss + 1] = n end
     end
-    fmsg("Есть: " .. (#have > 0 and table.concat(have, ", ") or "ничего"))
-    fmsg("Нет: " .. table.concat(miss, ", "))
-    fmsg("encodeJson: " .. (encodeJson and "да" or "нет (мини-JSON)") .. ", io.popen: " .. (io.popen and "да" or "нет"))
+    fmsg("Г…Г±ГІГј: " .. (#have > 0 and table.concat(have, ", ") or "Г­ГЁГ·ГҐГЈГ®"))
+    fmsg("ГЌГҐГІ: " .. table.concat(miss, ", "))
+    fmsg("encodeJson: " .. (encodeJson and "Г¤Г " or "Г­ГҐГІ (Г¬ГЁГ­ГЁ-JSON)") .. ", io.popen: " .. (io.popen and "Г¤Г " or "Г­ГҐГІ"))
 end
 
 function AI.suggest(r, cb)
-    AI.status = "ИИ думает..."
-    AI.ask(cfg.aiPrompt, "Репорт от игрока " .. r.name .. ": " .. r.text, function(ok, text)
-        AI.status = ok and "Ответ готов, проверьте и отправьте." or ("Ошибка: " .. tostring(text))
+    AI.status = "Г€Г€ Г¤ГіГ¬Г ГҐГІ..."
+    AI.ask(cfg.aiPrompt, "ГђГҐГЇГ®Г°ГІ Г®ГІ ГЁГЈГ°Г®ГЄГ  " .. r.name .. ": " .. r.text, function(ok, text)
+        AI.status = ok and "ГЋГІГўГҐГІ ГЈГ®ГІГ®Гў, ГЇГ°Г®ГўГҐГ°ГјГІГҐ ГЁ Г®ГІГЇГ°Г ГўГјГІГҐ." or ("ГЋГёГЁГЎГЄГ : " .. tostring(text))
         if ok then AI.result = { id = r.id, text = text } end
         cb(ok, text)
     end)
 end
 
 function AI.test()
-    AI.status = "Проверяю связь..."
-    AI.ask(cfg.aiPrompt, "Привет! Ответь одним коротким предложением.", function(ok, text)
-        AI.status = ok and ("Работает: " .. text) or ("Ошибка: " .. tostring(text))
+    AI.status = "ГЏГ°Г®ГўГҐГ°ГїГѕ Г±ГўГїГ§Гј..."
+    AI.ask(cfg.aiPrompt, "ГЏГ°ГЁГўГҐГІ! ГЋГІГўГҐГІГј Г®Г¤Г­ГЁГ¬ ГЄГ®Г°Г®ГІГЄГЁГ¬ ГЇГ°ГҐГ¤Г«Г®Г¦ГҐГ­ГЁГҐГ¬.", function(ok, text)
+        AI.status = ok and ("ГђГ ГЎГ®ГІГ ГҐГІ: " .. text) or ("ГЋГёГЁГЎГЄГ : " .. tostring(text))
     end)
 end
 
--- /ai [ID]: подсказка по репорту, текст попадает в строку ввода как /rr ID текст
+-- /ai [ID]: ГЇГ®Г¤Г±ГЄГ Г§ГЄГ  ГЇГ® Г°ГҐГЇГ®Г°ГІГі, ГІГҐГЄГ±ГІ ГЇГ®ГЇГ Г¤Г ГҐГІ Гў Г±ГІГ°Г®ГЄГі ГўГўГ®Г¤Г  ГЄГ ГЄ /rr ID ГІГҐГЄГ±ГІ
 function AI.cmdAsk(p)
     local id = (p or ""):match("^(%d+)")
     local r
     for _, x in ipairs(reports) do
         if not id or x.id == id then r = x break end
     end
-    if not r then fmsg("Репорт не найден. Список: /reports") return end
-    fmsg("Спрашиваю ИИ про репорт от " .. r.name .. "...")
+    if not r then fmsg("ГђГҐГЇГ®Г°ГІ Г­ГҐ Г­Г Г©Г¤ГҐГ­. Г‘ГЇГЁГ±Г®ГЄ: /reports") return end
+    fmsg("Г‘ГЇГ°Г ГёГЁГўГ Гѕ Г€Г€ ГЇГ°Г® Г°ГҐГЇГ®Г°ГІ Г®ГІ " .. r.name .. "...")
     AI.suggest(r, function(ok, text)
-        fmsg("ИИ: " .. tostring(text))
+        fmsg("Г€Г€: " .. tostring(text))
         if ok then
             sampSetChatInputText("/rr " .. r.id .. " " .. text)
             sampSetChatInputEnabled(true)
@@ -947,18 +947,18 @@ function AI.cmdSet(p)
     local f = k and AI_FIELDS[lower1251(k)]
     v = trim(v or "")
     if not f or v == "" then
-        fmsg("/aiset url|key|model|prompt значение. Сейчас: ключ " .. (trim(cfg.aiKey) ~= "" and "задан" or "не задан") ..
-            ", модель " .. cfg.aiModel .. ". Проверка: /ai ID")
+        fmsg("/aiset url|key|model|prompt Г§Г­Г Г·ГҐГ­ГЁГҐ. Г‘ГҐГ©Г·Г Г±: ГЄГ«ГѕГ· " .. (trim(cfg.aiKey) ~= "" and "Г§Г Г¤Г Г­" or "Г­ГҐ Г§Г Г¤Г Г­") ..
+            ", Г¬Г®Г¤ГҐГ«Гј " .. cfg.aiModel .. ". ГЏГ°Г®ГўГҐГ°ГЄГ : /ai ID")
         return
     end
     cfg[f] = v:gsub("[\r\n]+", " ")
     saveCfg()
-    fmsg("ИИ: " .. k .. " сохранено.")
+    fmsg("Г€Г€: " .. k .. " Г±Г®ГµГ°Г Г­ГҐГ­Г®.")
 end
 
 ----------------------------------------------------------------------
--- ПРОВЕРКА ОБНОВЛЕНИЙ ПО GITHUB
--- В репозитории лежит version.txt: 1-я строка - версия, 2-я - что нового.
+-- ГЏГђГЋГ‚Г…ГђГЉГЂ ГЋГЃГЌГЋГ‚Г‹Г…ГЌГ€Г‰ ГЏГЋ GITHUB
+-- Г‚ Г°ГҐГЇГ®Г§ГЁГІГ®Г°ГЁГЁ Г«ГҐГ¦ГЁГІ version.txt: 1-Гї Г±ГІГ°Г®ГЄГ  - ГўГҐГ°Г±ГЁГї, 2-Гї - Г·ГІГ® Г­Г®ГўГ®ГЈГ®.
 ----------------------------------------------------------------------
 local UPD = {
     base = "https://raw.githubusercontent.com/filippdanko174-bit/inferno-helper/main/",
@@ -972,7 +972,7 @@ local function verParts(v)
     return t
 end
 
-local function verNewer(a, b)   -- a новее b?
+local function verNewer(a, b)   -- a Г­Г®ГўГҐГҐ b?
     local x, y = verParts(a), verParts(b)
     for i = 1, math.max(#x, #y) do
         local p, q = x[i] or 0, y[i] or 0
@@ -981,30 +981,30 @@ local function verNewer(a, b)   -- a новее b?
     return false
 end
 
--- silent: не писать «у вас последняя версия»
+-- silent: Г­ГҐ ГЇГЁГ±Г ГІГј В«Гі ГўГ Г± ГЇГ®Г±Г«ГҐГ¤Г­ГїГї ГўГҐГ°Г±ГЁГїВ»
 function UPD.check(silent)
     if UPD.busy then return end
     UPD.busy = true
-    UPD.status = "Проверяю обновления..."
+    UPD.status = "ГЏГ°Г®ГўГҐГ°ГїГѕ Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГї..."
     lua_thread.create(function()
         local ok, code, text = pcall(AI.http, UPD.base .. "version.txt", "", "", "GET")
         UPD.busy = false
         if not ok or not code or code ~= 200 or type(text) ~= "string" then
-            UPD.status = "Не удалось проверить обновления."
-            if not silent then fmsg("Не удалось проверить обновления (" .. tostring(ok and (code or text) or code) .. ").") end
+            UPD.status = "ГЌГҐ ГіГ¤Г Г«Г®Г±Гј ГЇГ°Г®ГўГҐГ°ГЁГІГј Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГї."
+            if not silent then fmsg("ГЌГҐ ГіГ¤Г Г«Г®Г±Гј ГЇГ°Г®ГўГҐГ°ГЁГІГј Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГї (" .. tostring(ok and (code or text) or code) .. ").") end
             return
         end
         local ver, notes = text:match("^%s*([%d%.]+)[^\n]*\n?(.*)$")
-        if not ver then UPD.status = "Не удалось разобрать version.txt." return end
+        if not ver then UPD.status = "ГЌГҐ ГіГ¤Г Г«Г®Г±Гј Г°Г Г§Г®ГЎГ°Г ГІГј version.txt." return end
         UPD.checked, UPD.latest, UPD.notes = true, ver, trim(fromUi((notes or ""):gsub("[\r\n]+", " ")))
         if verNewer(ver, VERSION) then
-            UPD.status = "Доступна версия " .. ver
-            fmsg("{FFD700}Доступно обновление {FFFFFF}v" .. ver .. " {A9A9A9}(у вас v" .. VERSION .. ")")
-            if UPD.notes ~= "" then fmsg("{A9A9A9}Что нового: {FFFFFF}" .. UPD.notes) end
-            fmsg("{A9A9A9}Установить: {FFFF00}/fhupd install {A9A9A9}или кнопка в /fh на «Главной»")
+            UPD.status = "Г„Г®Г±ГІГіГЇГ­Г  ГўГҐГ°Г±ГЁГї " .. ver
+            fmsg("{FFD700}Г„Г®Г±ГІГіГЇГ­Г® Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГҐ {FFFFFF}v" .. ver .. " {A9A9A9}(Гі ГўГ Г± v" .. VERSION .. ")")
+            if UPD.notes ~= "" then fmsg("{A9A9A9}Г—ГІГ® Г­Г®ГўГ®ГЈГ®: {FFFFFF}" .. UPD.notes) end
+            fmsg("{A9A9A9}Г“Г±ГІГ Г­Г®ГўГЁГІГј: {FFFF00}/fhupd install {A9A9A9}ГЁГ«ГЁ ГЄГ­Г®ГЇГЄГ  Гў /fh Г­Г  В«ГѓГ«Г ГўГ­Г®Г©В»")
         else
             UPD.latest = nil
-            UPD.status = "У вас последняя версия (v" .. VERSION .. ")."
+            UPD.status = "Г“ ГўГ Г± ГЇГ®Г±Г«ГҐГ¤Г­ГїГї ГўГҐГ°Г±ГЁГї (v" .. VERSION .. ")."
             if not silent then fmsg(UPD.status) end
         end
     end)
@@ -1012,17 +1012,17 @@ end
 
 function UPD.install()
     if UPD.busy then return end
-    if not UPD.latest then fmsg("Сначала проверьте обновления: /fhupd") return end
+    if not UPD.latest then fmsg("Г‘Г­Г Г·Г Г«Г  ГЇГ°Г®ГўГҐГ°ГјГІГҐ Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГї: /fhupd") return end
     UPD.busy = true
-    UPD.status = "Скачиваю обновление..."
-    fmsg("Скачиваю v" .. UPD.latest .. "...")
+    UPD.status = "Г‘ГЄГ Г·ГЁГўГ Гѕ Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГҐ..."
+    fmsg("Г‘ГЄГ Г·ГЁГўГ Гѕ v" .. UPD.latest .. "...")
     lua_thread.create(function()
         local ok, err = pcall(function()
             local code, text = AI.http(UPD.base .. UPD.file, "", "", "GET")
-            if code ~= 200 or type(text) ~= "string" then error("ошибка загрузки (" .. tostring(code) .. ")") end
-            if #text < 20000 or not text:find("FilippHelper", 1, true) then error("файл повреждён или неполный") end
+            if code ~= 200 or type(text) ~= "string" then error("Г®ГёГЁГЎГЄГ  Г§Г ГЈГ°ГіГ§ГЄГЁ (" .. tostring(code) .. ")") end
+            if #text < 20000 or not text:find("FilippHelper", 1, true) then error("ГґГ Г©Г« ГЇГ®ГўГ°ГҐГ¦Г¤ВёГ­ ГЁГ«ГЁ Г­ГҐГЇГ®Г«Г­Г»Г©") end
             local chunk, cerr = (loadstring or load)(text)
-            if not chunk then error("файл не компилируется: " .. tostring(cerr)) end
+            if not chunk then error("ГґГ Г©Г« Г­ГҐ ГЄГ®Г¬ГЇГЁГ«ГЁГ°ГіГҐГІГ±Гї: " .. tostring(cerr)) end
             local path = thisScript().path
             local old = io.open(path, "rb")
             if old then
@@ -1035,13 +1035,13 @@ function UPD.install()
         end)
         UPD.busy = false
         if ok then
-            UPD.status = "Обновлено до v" .. tostring(UPD.latest) .. ", перезагрузка..."
-            fmsg("{66FF66}Обновлено до v" .. tostring(UPD.latest) .. ". Перезагружаю скрипт...")
+            UPD.status = "ГЋГЎГ­Г®ГўГ«ГҐГ­Г® Г¤Г® v" .. tostring(UPD.latest) .. ", ГЇГҐГ°ГҐГ§Г ГЈГ°ГіГ§ГЄГ ..."
+            fmsg("{66FF66}ГЋГЎГ­Г®ГўГ«ГҐГ­Г® Г¤Г® v" .. tostring(UPD.latest) .. ". ГЏГҐГ°ГҐГ§Г ГЈГ°ГіГ¦Г Гѕ Г±ГЄГ°ГЁГЇГІ...")
             wait(800)
             pcall(function() thisScript():reload() end)
         else
-            UPD.status = "Ошибка обновления: " .. tostring(err)
-            fmsg("{FF6666}Обновление не удалось: " .. tostring(err))
+            UPD.status = "ГЋГёГЁГЎГЄГ  Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГї: " .. tostring(err)
+            fmsg("{FF6666}ГЋГЎГ­Г®ГўГ«ГҐГ­ГЁГҐ Г­ГҐ ГіГ¤Г Г«Г®Г±Гј: " .. tostring(err))
         end
     end)
 end
@@ -1053,14 +1053,14 @@ end
 
 local function uiReports()
     if #reports == 0 then
-        fmsg("Репортов пока нет.")
+        fmsg("ГђГҐГЇГ®Г°ГІГ®Гў ГЇГ®ГЄГ  Г­ГҐГІ.")
         return
     end
     local t = {}
     for i, r in ipairs(reports) do
         t[i] = string.format("{FFFF00}[%s] {FFFFFF}%s: {A9A9A9}%s", r.id, r.name, r.text)
     end
-    uiShow(D_RLIST, "FH | Последние репорты", table.concat(t, "\n"), "Ответить", "Закрыть", 2)
+    uiShow(D_RLIST, "FH | ГЏГ®Г±Г«ГҐГ¤Г­ГЁГҐ Г°ГҐГЇГ®Г°ГІГ»", table.concat(t, "\n"), "ГЋГІГўГҐГІГЁГІГј", "Г‡Г ГЄГ°Г»ГІГј", 2)
 end
 
 local D_RTPL = 4147
@@ -1069,9 +1069,9 @@ local function findReport(id)
 end
 
 local function uiTemplatesFor(r)
-    local t = { "{33CC33}Написать свой ответ" }
+    local t = { "{33CC33}ГЌГ ГЇГЁГ±Г ГІГј Г±ГўГ®Г© Г®ГІГўГҐГІ" }
     for _, x in ipairs(templates) do t[#t + 1] = "{FFFFFF}" .. x end
-    uiShow(D_RTPL, "Ответ: " .. r.name .. "[" .. r.id .. "]", table.concat(t, "\n"), "Отправить", "Назад", 2)
+    uiShow(D_RTPL, "ГЋГІГўГҐГІ: " .. r.name .. "[" .. r.id .. "]", table.concat(t, "\n"), "ГЋГІГЇГ°Г ГўГЁГІГј", "ГЌГ Г§Г Г¤", 2)
 end
 
 uiHandlers[D_RLIST] = function(button, list)
@@ -1086,8 +1086,8 @@ uiHandlers[D_RTPL] = function(button, list)
     local r = ui.replyId and findReport(ui.replyId)
     if button == 0 or not r then return uiReports() end
     if list == 0 then
-        uiShow(D_RREPLY, "Ответ игроку " .. r.name .. "[" .. r.id .. "]",
-            "Жалоба: " .. r.text .. "\n\nВведите ответ (уйдёт через /pm):", "Отправить", "Назад", 1)
+        uiShow(D_RREPLY, "ГЋГІГўГҐГІ ГЁГЈГ°Г®ГЄГі " .. r.name .. "[" .. r.id .. "]",
+            "Г†Г Г«Г®ГЎГ : " .. r.text .. "\n\nГ‚ГўГҐГ¤ГЁГІГҐ Г®ГІГўГҐГІ (ГіГ©Г¤ВёГІ Г·ГҐГ°ГҐГ§ /pm):", "ГЋГІГЇГ°Г ГўГЁГІГј", "ГЌГ Г§Г Г¤", 1)
     elseif templates[list] then
         replyTo(r.id, templates[list])
     end
@@ -1099,26 +1099,26 @@ uiHandlers[D_RREPLY] = function(button, _, input)
 end
 
 ----------------------------------------------------------------------
--- РАЗДАЧА ПРИЗОВ
+-- ГђГЂГ‡Г„ГЂГ—ГЂ ГЏГђГ€Г‡ГЋГ‚
 ----------------------------------------------------------------------
 local gw = { active = false, last = false, word = "", prize = "", stat = nil, amount = nil, t0 = 0 }
-local GW_TAG = "[Раздача]"
+local GW_TAG = "[ГђГ Г§Г¤Г Г·Г ]"
 local GW_IGNORE_NAMES = { Admin = true, Utka_News = true }
 
--- {номер статы на сервере, названия приза...}
+-- {Г­Г®Г¬ГҐГ° Г±ГІГ ГІГ» Г­Г  Г±ГҐГ°ГўГҐГ°ГҐ, Г­Г Г§ГўГ Г­ГЁГї ГЇГ°ГЁГ§Г ...}
 local PRIZE_TYPES = {
-    { 7,  "bank", "банк", "деньги", "money", "руб" },
-    { 1,  "lvl", "лвл", "уровень", "level" },
-    { 3,  "mat", "мат" },
-    { 6,  "exp", "опыт" },
-    { 2,  "закон" },
-    { 5,  "sim", "сим", "номер" },
-    { 12, "box", "бокс" },
-    { 13, "kung", "кунг" },
-    { 14, "kick", "кик" },
+    { 7,  "bank", "ГЎГ Г­ГЄ", "Г¤ГҐГ­ГјГЈГЁ", "money", "Г°ГіГЎ" },
+    { 1,  "lvl", "Г«ГўГ«", "ГіГ°Г®ГўГҐГ­Гј", "level" },
+    { 3,  "mat", "Г¬Г ГІ" },
+    { 6,  "exp", "Г®ГЇГ»ГІ" },
+    { 2,  "Г§Г ГЄГ®Г­" },
+    { 5,  "sim", "Г±ГЁГ¬", "Г­Г®Г¬ГҐГ°" },
+    { 12, "box", "ГЎГ®ГЄГ±" },
+    { 13, "kung", "ГЄГіГ­ГЈ" },
+    { 14, "kick", "ГЄГЁГЄ" },
 }
 
--- "банк 500.000" -> 7, "500000"; "#9 15" -> 9, "15"; не распознано -> nil
+-- "ГЎГ Г­ГЄ 500.000" -> 7, "500000"; "#9 15" -> 9, "15"; Г­ГҐ Г°Г Г±ГЇГ®Г§Г­Г Г­Г® -> nil
 local function parsePrize(spec)
     local low = lower1251(spec)
     local word, rest = low:match("^(%S+)%s*(.*)$")
@@ -1144,16 +1144,16 @@ local function gwFinish(name, id)
     local isLast = gw.last
     gw.last = false
     local sec = math.max(1, math.floor(os.clock() - gw.t0 + 0.5))
-    local lines = { string.format("/aad %s Победитель - %s! Время: %d сек.", GW_TAG, name, sec) }
+    local lines = { string.format("/aad %s ГЏГ®ГЎГҐГ¤ГЁГІГҐГ«Гј - %s! Г‚Г°ГҐГ¬Гї: %d Г±ГҐГЄ.", GW_TAG, name, sec) }
     if gw.stat then
-        lines[#lines + 1] = string.format("/pm %s Поздравляю, вы первый! Приз сейчас будет выдан.", id)
+        lines[#lines + 1] = string.format("/pm %s ГЏГ®Г§Г¤Г°Г ГўГ«ГїГѕ, ГўГ» ГЇГҐГ°ГўГ»Г©! ГЏГ°ГЁГ§ Г±ГҐГ©Г·Г Г± ГЎГіГ¤ГҐГІ ГўГ»Г¤Г Г­.", id)
         lines[#lines + 1] = string.format("/setstat %s %d %s", id, gw.stat, gw.amount)
-        lines[#lines + 1] = string.format("/pm %s Приз выдан, приятной игры!", id)
+        lines[#lines + 1] = string.format("/pm %s ГЏГ°ГЁГ§ ГўГ»Г¤Г Г­, ГЇГ°ГЁГїГІГ­Г®Г© ГЁГЈГ°Г»!", id)
     else
-        fmsg(string.format("{FFFF00}Выдайте приз вручную: %s [%s] -> %s", name, id, gw.prize))
-        lines[#lines + 1] = string.format("/pm %s Поздравляю, вы первый! Приз выдам в ближайшее время.", id)
+        fmsg(string.format("{FFFF00}Г‚Г»Г¤Г Г©ГІГҐ ГЇГ°ГЁГ§ ГўГ°ГіГ·Г­ГіГѕ: %s [%s] -> %s", name, id, gw.prize))
+        lines[#lines + 1] = string.format("/pm %s ГЏГ®Г§Г¤Г°Г ГўГ«ГїГѕ, ГўГ» ГЇГҐГ°ГўГ»Г©! ГЏГ°ГЁГ§ ГўГ»Г¤Г Г¬ Гў ГЎГ«ГЁГ¦Г Г©ГёГҐГҐ ГўГ°ГҐГ¬Гї.", id)
     end
-    if isLast then lines[#lines + 1] = "/aad " .. GW_TAG .. " Раздача завершена, спасибо всем за участие!" end
+    if isLast then lines[#lines + 1] = "/aad " .. GW_TAG .. " ГђГ Г§Г¤Г Г·Г  Г§Г ГўГҐГ°ГёГҐГ­Г , Г±ГЇГ Г±ГЁГЎГ® ГўГ±ГҐГ¬ Г§Г  ГіГ·Г Г±ГІГЁГҐ!" end
     sendSeq(lines, SEND_GAP, nil, SEND_GAP)
 end
 
@@ -1168,22 +1168,22 @@ end
 local function gwStart(param, isLast)
     local word, prize = gwParse(param)
     if not word then
-        fmsg("Использование: /" .. (isLast and "gwlast" or "gw") .. " слово | приз   (например: /gw котик | банк 500000)")
+        fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /" .. (isLast and "gwlast" or "gw") .. " Г±Г«Г®ГўГ® | ГЇГ°ГЁГ§   (Г­Г ГЇГ°ГЁГ¬ГҐГ°: /gw ГЄГ®ГІГЁГЄ | ГЎГ Г­ГЄ 500000)")
         return
     end
     gw.word, gw.prize, gw.last = lower1251(word), prize, isLast
     gw.stat, gw.amount = parsePrize(prize)
     gw.t0 = os.clock()
     gw.active = true
-    local head = isLast and "ФИНАЛ! " or ""
+    local head = isLast and "Г”Г€ГЌГЂГ‹! " or ""
     sendSeq({
-        string.format("/aad %s %sПриз: %s", GW_TAG, head, prize),
-        string.format("/aad %s Кто первым отправит в /rep слово «%s» - тот победил!", GW_TAG, word),
+        string.format("/aad %s %sГЏГ°ГЁГ§: %s", GW_TAG, head, prize),
+        string.format("/aad %s ГЉГІГ® ГЇГҐГ°ГўГ»Г¬ Г®ГІГЇГ°Г ГўГЁГІ Гў /rep Г±Г«Г®ГўГ® В«%sВ» - ГІГ®ГІ ГЇГ®ГЎГҐГ¤ГЁГ«!", GW_TAG, word),
     }, SEND_GAP)
     if gw.stat then
-        fmsg(string.format("Раздача запущена. Слово: {FFFF00}%s{FFFFFF}. Приз выдастся сам (стата %d, кол-во %s).", word, gw.stat, gw.amount))
+        fmsg(string.format("ГђГ Г§Г¤Г Г·Г  Г§Г ГЇГіГ№ГҐГ­Г . Г‘Г«Г®ГўГ®: {FFFF00}%s{FFFFFF}. ГЏГ°ГЁГ§ ГўГ»Г¤Г Г±ГІГ±Гї Г±Г Г¬ (Г±ГІГ ГІГ  %d, ГЄГ®Г«-ГўГ® %s).", word, gw.stat, gw.amount))
     else
-        fmsg(string.format("Раздача запущена. Слово: {FFFF00}%s{FFFFFF}. Тип приза не распознан - выдавать придётся вручную.", word))
+        fmsg(string.format("ГђГ Г§Г¤Г Г·Г  Г§Г ГЇГіГ№ГҐГ­Г . Г‘Г«Г®ГўГ®: {FFFF00}%s{FFFFFF}. Г’ГЁГЇ ГЇГ°ГЁГ§Г  Г­ГҐ Г°Г Г±ГЇГ®Г§Г­Г Г­ - ГўГ»Г¤Г ГўГ ГІГј ГЇГ°ГЁГ¤ВёГІГ±Гї ГўГ°ГіГ·Г­ГіГѕ.", word))
     end
 end
 
@@ -1192,11 +1192,11 @@ uiHandlers[D_GWSTART] = function(button, _, input)
 end
 
 ----------------------------------------------------------------------
--- ЗАНЯТЬ ЗАДАЧУ: "z ..." несколько раз в /a
+-- Г‡ГЂГЌГџГ’Гњ Г‡ГЂГ„ГЂГ—Г“: "z ..." Г­ГҐГ±ГЄГ®Г«ГјГЄГ® Г°Г Г§ Гў /a
 ----------------------------------------------------------------------
 local D_Z = 4148
 local CLAIM_COUNT = 3
--- {ключ, текст после "z "}
+-- {ГЄГ«ГѕГ·, ГІГҐГЄГ±ГІ ГЇГ®Г±Г«ГҐ "z "}
 local CLAIMS = {
     { "ao", "aad otbor" }, { "oo", "o otbor" }, { "am", "aad mp" }, { "ar", "aad razdacha" },
     { "sp", "spawn" }, { "on", "o nabor" },
@@ -1214,7 +1214,7 @@ end
 local function uiClaims()
     local t = {}
     for i, c in ipairs(CLAIMS) do t[i] = string.format("{FFFF00}z %s {A9A9A9}(/z %s)", c[2], c[1]) end
-    uiShow(D_Z, "FH | Занять", table.concat(t, "\n"), "Занять", "Закрыть", 2)
+    uiShow(D_Z, "FH | Г‡Г Г­ГїГІГј", table.concat(t, "\n"), "Г‡Г Г­ГїГІГј", "Г‡Г ГЄГ°Г»ГІГј", 2)
 end
 
 uiHandlers[D_Z] = function(button, list)
@@ -1224,29 +1224,29 @@ uiHandlers[D_Z] = function(button, list)
 end
 
 ----------------------------------------------------------------------
--- МЕРОПРИЯТИЯ: готовые анонсы в /aad
+-- ГЊГ…ГђГЋГЏГђГ€ГџГ’Г€Гџ: ГЈГ®ГІГ®ГўГ»ГҐ Г Г­Г®Г­Г±Г» Гў /aad
 ----------------------------------------------------------------------
 local D_EV, D_FR, D_FRACT, D_NOTES, D_NOTE, D_NOTEADD = 4140, 4141, 4142, 4144, 4145, 4146
 local D_EVPRIZE = 4149
 
--- {ключ, название, строки анонса}. {id} подставляется для интерактивных МП.
+-- {ГЄГ«ГѕГ·, Г­Г Г§ГўГ Г­ГЁГҐ, Г±ГІГ°Г®ГЄГЁ Г Г­Г®Г­Г±Г }. {id} ГЇГ®Г¤Г±ГІГ ГўГ«ГїГҐГІГ±Гї Г¤Г«Гї ГЁГ­ГІГҐГ°Г ГЄГІГЁГўГ­Г»Гµ ГЊГЏ.
 local EVENTS = {
-    { "svet", "Светофор", "Бежим к финишу на «Зелёный» и замираем на «Красный».", "Кто двинулся на красный - вылетает. Побеждает первый на финише." },
-    { "poliv", "Поливалка", "Нужно удержаться на крыше, пока вас поливают из БТР.", "Оружие и толчки запрещены. Побеждает последний оставшийся." },
-    { "derbi", "Дерби", "Садимся в машины и таранитесь на арене.", "Побеждает тот, чья машина осталась на ходу последней." },
-    { "pryat", "Прятки", "Прячьтесь от ведущего где угодно на локации.", "По команде можно пользоваться масками и анимациями." },
-    { "parkur", "Паркур", "Кто быстрее всех доберётся до вершины паркур-зоны?", "Без оружия, помех другим и багов." },
-    { "rulet", "Русская рулетка", "Встаём в строй и по очереди пытаем удачу.", "Строй не нарушать, оружие и анимации не использовать." },
-    { "kovsh", "Гонки от Ковша", "Игроки на квадроциклах уворачиваются от Гелика с ковшом.", "Баги, ремонт машин и сторонний софт запрещены. Выживает последний." },
-    { "myaso", "Мясорубка", "Бегаем по локации и уходим от бензопилы ведущего.", "Без оружия, брони и масок. Побеждает последний выживший." },
-    { "dogon", "Догонялки", "Ведущий гонится за игроками.", "Кого ударили кулаком - тот выбыл. Анимации и баги запрещены." },
-    { "car", "Царь горы", "Заберитесь на вершину горы из объектов и держитесь.", "Только кулаки, без оружия и масок. Побеждает тот, кто остался наверху." },
-    { "parash", "Прыжки с парашютом", "Все получают парашюты и приземляются на метку ведущего.", "Промазал или разбился - выбыл. Важна точность." },
-    { "digl", "Король Дигла", "Каждому выдаётся Deagle.", "Нужно убрать всех соперников. Побеждает последний живой." },
-    { "sultan", "Увернись от Султана", "Игроки в строю, ведущий едет на машине.", "Кого задели - тот выбыл. Нужно вовремя подпрыгнуть." },
-    { "paint", "Пейнтбол", "Каждый сам за себя, считаются убийства.", "Побеждает тот, у кого в конце больше фрагментов." },
-    { "krug", "Круг Смерти", "Игроки встают кругом, ведущий выдаёт Deagle с одним патроном.", "Задача - выстрелить в оппонента." },
-    { "infern", "Догони Инфернус", "Найдите на карте ЧЁРНЫЙ INFERNUS ведущего и передайте ему 1 рубль: /pay {id} 1.", "Читы и помехи запрещены. Побеждает первый, кто передал." },
+    { "svet", "Г‘ГўГҐГІГ®ГґГ®Г°", "ГЃГҐГ¦ГЁГ¬ ГЄ ГґГЁГ­ГЁГёГі Г­Г  В«Г‡ГҐГ«ВёГ­Г»Г©В» ГЁ Г§Г Г¬ГЁГ°Г ГҐГ¬ Г­Г  В«ГЉГ°Г Г±Г­Г»Г©В».", "ГЉГІГ® Г¤ГўГЁГ­ГіГ«Г±Гї Г­Г  ГЄГ°Г Г±Г­Г»Г© - ГўГ»Г«ГҐГІГ ГҐГІ. ГЏГ®ГЎГҐГ¦Г¤Г ГҐГІ ГЇГҐГ°ГўГ»Г© Г­Г  ГґГЁГ­ГЁГёГҐ." },
+    { "poliv", "ГЏГ®Г«ГЁГўГ Г«ГЄГ ", "ГЌГіГ¦Г­Г® ГіГ¤ГҐГ°Г¦Г ГІГјГ±Гї Г­Г  ГЄГ°Г»ГёГҐ, ГЇГ®ГЄГ  ГўГ Г± ГЇГ®Г«ГЁГўГ ГѕГІ ГЁГ§ ГЃГ’Гђ.", "ГЋГ°ГіГ¦ГЁГҐ ГЁ ГІГ®Г«Г·ГЄГЁ Г§Г ГЇГ°ГҐГ№ГҐГ­Г». ГЏГ®ГЎГҐГ¦Г¤Г ГҐГІ ГЇГ®Г±Г«ГҐГ¤Г­ГЁГ© Г®Г±ГІГ ГўГёГЁГ©Г±Гї." },
+    { "derbi", "Г„ГҐГ°ГЎГЁ", "Г‘Г Г¤ГЁГ¬Г±Гї Гў Г¬Г ГёГЁГ­Г» ГЁ ГІГ Г°Г Г­ГЁГІГҐГ±Гј Г­Г  Г Г°ГҐГ­ГҐ.", "ГЏГ®ГЎГҐГ¦Г¤Г ГҐГІ ГІГ®ГІ, Г·ГјГї Г¬Г ГёГЁГ­Г  Г®Г±ГІГ Г«Г Г±Гј Г­Г  ГµГ®Г¤Гі ГЇГ®Г±Г«ГҐГ¤Г­ГҐГ©." },
+    { "pryat", "ГЏГ°ГїГІГЄГЁ", "ГЏГ°ГїГ·ГјГІГҐГ±Гј Г®ГІ ГўГҐГ¤ГіГ№ГҐГЈГ® ГЈГ¤ГҐ ГіГЈГ®Г¤Г­Г® Г­Г  Г«Г®ГЄГ Г¶ГЁГЁ.", "ГЏГ® ГЄГ®Г¬Г Г­Г¤ГҐ Г¬Г®Г¦Г­Г® ГЇГ®Г«ГјГ§Г®ГўГ ГІГјГ±Гї Г¬Г Г±ГЄГ Г¬ГЁ ГЁ Г Г­ГЁГ¬Г Г¶ГЁГїГ¬ГЁ." },
+    { "parkur", "ГЏГ Г°ГЄГіГ°", "ГЉГІГ® ГЎГ»Г±ГІГ°ГҐГҐ ГўГ±ГҐГµ Г¤Г®ГЎГҐГ°ВёГІГ±Гї Г¤Г® ГўГҐГ°ГёГЁГ­Г» ГЇГ Г°ГЄГіГ°-Г§Г®Г­Г»?", "ГЃГҐГ§ Г®Г°ГіГ¦ГЁГї, ГЇГ®Г¬ГҐГµ Г¤Г°ГіГЈГЁГ¬ ГЁ ГЎГ ГЈГ®Гў." },
+    { "rulet", "ГђГіГ±Г±ГЄГ Гї Г°ГіГ«ГҐГІГЄГ ", "Г‚Г±ГІГ ВёГ¬ Гў Г±ГІГ°Г®Г© ГЁ ГЇГ® Г®Г·ГҐГ°ГҐГ¤ГЁ ГЇГ»ГІГ ГҐГ¬ ГіГ¤Г Г·Гі.", "Г‘ГІГ°Г®Г© Г­ГҐ Г­Г Г°ГіГёГ ГІГј, Г®Г°ГіГ¦ГЁГҐ ГЁ Г Г­ГЁГ¬Г Г¶ГЁГЁ Г­ГҐ ГЁГ±ГЇГ®Г«ГјГ§Г®ГўГ ГІГј." },
+    { "kovsh", "ГѓГ®Г­ГЄГЁ Г®ГІ ГЉГ®ГўГёГ ", "Г€ГЈГ°Г®ГЄГЁ Г­Г  ГЄГўГ Г¤Г°Г®Г¶ГЁГЄГ«Г Гµ ГіГўГ®Г°Г Г·ГЁГўГ ГѕГІГ±Гї Г®ГІ ГѓГҐГ«ГЁГЄГ  Г± ГЄГ®ГўГёГ®Г¬.", "ГЃГ ГЈГЁ, Г°ГҐГ¬Г®Г­ГІ Г¬Г ГёГЁГ­ ГЁ Г±ГІГ®Г°Г®Г­Г­ГЁГ© Г±Г®ГґГІ Г§Г ГЇГ°ГҐГ№ГҐГ­Г». Г‚Г»Г¦ГЁГўГ ГҐГІ ГЇГ®Г±Г«ГҐГ¤Г­ГЁГ©." },
+    { "myaso", "ГЊГїГ±Г®Г°ГіГЎГЄГ ", "ГЃГҐГЈГ ГҐГ¬ ГЇГ® Г«Г®ГЄГ Г¶ГЁГЁ ГЁ ГіГµГ®Г¤ГЁГ¬ Г®ГІ ГЎГҐГ­Г§Г®ГЇГЁГ«Г» ГўГҐГ¤ГіГ№ГҐГЈГ®.", "ГЃГҐГ§ Г®Г°ГіГ¦ГЁГї, ГЎГ°Г®Г­ГЁ ГЁ Г¬Г Г±Г®ГЄ. ГЏГ®ГЎГҐГ¦Г¤Г ГҐГІ ГЇГ®Г±Г«ГҐГ¤Г­ГЁГ© ГўГ»Г¦ГЁГўГёГЁГ©." },
+    { "dogon", "Г„Г®ГЈГ®Г­ГїГ«ГЄГЁ", "Г‚ГҐГ¤ГіГ№ГЁГ© ГЈГ®Г­ГЁГІГ±Гї Г§Г  ГЁГЈГ°Г®ГЄГ Г¬ГЁ.", "ГЉГ®ГЈГ® ГіГ¤Г Г°ГЁГ«ГЁ ГЄГіГ«Г ГЄГ®Г¬ - ГІГ®ГІ ГўГ»ГЎГ»Г«. ГЂГ­ГЁГ¬Г Г¶ГЁГЁ ГЁ ГЎГ ГЈГЁ Г§Г ГЇГ°ГҐГ№ГҐГ­Г»." },
+    { "car", "Г–Г Г°Гј ГЈГ®Г°Г»", "Г‡Г ГЎГҐГ°ГЁГІГҐГ±Гј Г­Г  ГўГҐГ°ГёГЁГ­Гі ГЈГ®Г°Г» ГЁГ§ Г®ГЎГєГҐГЄГІГ®Гў ГЁ Г¤ГҐГ°Г¦ГЁГІГҐГ±Гј.", "Г’Г®Г«ГјГЄГ® ГЄГіГ«Г ГЄГЁ, ГЎГҐГ§ Г®Г°ГіГ¦ГЁГї ГЁ Г¬Г Г±Г®ГЄ. ГЏГ®ГЎГҐГ¦Г¤Г ГҐГІ ГІГ®ГІ, ГЄГІГ® Г®Г±ГІГ Г«Г±Гї Г­Г ГўГҐГ°ГµГі." },
+    { "parash", "ГЏГ°Г»Г¦ГЄГЁ Г± ГЇГ Г°Г ГёГѕГІГ®Г¬", "Г‚Г±ГҐ ГЇГ®Г«ГіГ·Г ГѕГІ ГЇГ Г°Г ГёГѕГІГ» ГЁ ГЇГ°ГЁГ§ГҐГ¬Г«ГїГѕГІГ±Гї Г­Г  Г¬ГҐГІГЄГі ГўГҐГ¤ГіГ№ГҐГЈГ®.", "ГЏГ°Г®Г¬Г Г§Г Г« ГЁГ«ГЁ Г°Г Г§ГЎГЁГ«Г±Гї - ГўГ»ГЎГ»Г«. Г‚Г Г¦Г­Г  ГІГ®Г·Г­Г®Г±ГІГј." },
+    { "digl", "ГЉГ®Г°Г®Г«Гј Г„ГЁГЈГ«Г ", "ГЉГ Г¦Г¤Г®Г¬Гі ГўГ»Г¤Г ВёГІГ±Гї Deagle.", "ГЌГіГ¦Г­Г® ГіГЎГ°Г ГІГј ГўГ±ГҐГµ Г±Г®ГЇГҐГ°Г­ГЁГЄГ®Гў. ГЏГ®ГЎГҐГ¦Г¤Г ГҐГІ ГЇГ®Г±Г«ГҐГ¤Г­ГЁГ© Г¦ГЁГўГ®Г©." },
+    { "sultan", "Г“ГўГҐГ°Г­ГЁГ±Гј Г®ГІ Г‘ГіГ«ГІГ Г­Г ", "Г€ГЈГ°Г®ГЄГЁ Гў Г±ГІГ°Г®Гѕ, ГўГҐГ¤ГіГ№ГЁГ© ГҐГ¤ГҐГІ Г­Г  Г¬Г ГёГЁГ­ГҐ.", "ГЉГ®ГЈГ® Г§Г Г¤ГҐГ«ГЁ - ГІГ®ГІ ГўГ»ГЎГ»Г«. ГЌГіГ¦Г­Г® ГўГ®ГўГ°ГҐГ¬Гї ГЇГ®Г¤ГЇГ°Г»ГЈГ­ГіГІГј." },
+    { "paint", "ГЏГҐГ©Г­ГІГЎГ®Г«", "ГЉГ Г¦Г¤Г»Г© Г±Г Г¬ Г§Г  Г±ГҐГЎГї, Г±Г·ГЁГІГ ГѕГІГ±Гї ГіГЎГЁГ©Г±ГІГўГ .", "ГЏГ®ГЎГҐГ¦Г¤Г ГҐГІ ГІГ®ГІ, Гі ГЄГ®ГЈГ® Гў ГЄГ®Г­Г¶ГҐ ГЎГ®Г«ГјГёГҐ ГґГ°Г ГЈГ¬ГҐГ­ГІГ®Гў." },
+    { "krug", "ГЉГ°ГіГЈ Г‘Г¬ГҐГ°ГІГЁ", "Г€ГЈГ°Г®ГЄГЁ ГўГ±ГІГ ГѕГІ ГЄГ°ГіГЈГ®Г¬, ГўГҐГ¤ГіГ№ГЁГ© ГўГ»Г¤Г ВёГІ Deagle Г± Г®Г¤Г­ГЁГ¬ ГЇГ ГІГ°Г®Г­Г®Г¬.", "Г‡Г Г¤Г Г·Г  - ГўГ»Г±ГІГ°ГҐГ«ГЁГІГј Гў Г®ГЇГЇГ®Г­ГҐГ­ГІГ ." },
+    { "infern", "Г„Г®ГЈГ®Г­ГЁ Г€Г­ГґГҐГ°Г­ГіГ±", "ГЌГ Г©Г¤ГЁГІГҐ Г­Г  ГЄГ Г°ГІГҐ Г—ВЁГђГЌГ›Г‰ INFERNUS ГўГҐГ¤ГіГ№ГҐГЈГ® ГЁ ГЇГҐГ°ГҐГ¤Г Г©ГІГҐ ГҐГ¬Гі 1 Г°ГіГЎГ«Гј: /pay {id} 1.", "Г—ГЁГІГ» ГЁ ГЇГ®Г¬ГҐГµГЁ Г§Г ГЇГ°ГҐГ№ГҐГ­Г». ГЏГ®ГЎГҐГ¦Г¤Г ГҐГІ ГЇГҐГ°ГўГ»Г©, ГЄГІГ® ГЇГҐГ°ГҐГ¤Г Г«." },
 }
 
 local function eventByKey(key)
@@ -1262,25 +1262,25 @@ local function announceEvent(e, arg)
     if needId then
         local a, b = arg:match("^(%d+)%s*(.*)$")
         if a then id, prize = a, b else id, prize = watchedId, arg end
-        if not id then fmsg("Нужен ID ведущего: /ev " .. e[1] .. " ID [приз]") return end
+        if not id then fmsg("ГЌГіГ¦ГҐГ­ ID ГўГҐГ¤ГіГ№ГҐГЈГ®: /ev " .. e[1] .. " ID [ГЇГ°ГЁГ§]") return end
     end
     prize = trim(prize or "")
     local lines = {
-        string.format("/aad [МП] Внимание, игроки! Скоро стартует мероприятие «%s».", e[2]),
+        string.format("/aad [ГЊГЏ] Г‚Г­ГЁГ¬Г Г­ГЁГҐ, ГЁГЈГ°Г®ГЄГЁ! Г‘ГЄГ®Г°Г® Г±ГІГ Г°ГІГіГҐГІ Г¬ГҐГ°Г®ГЇГ°ГЁГїГІГЁГҐ В«%sВ».", e[2]),
     }
     for k = 3, #e do
-        lines[#lines + 1] = "/aad [МП] " .. e[k]:gsub("{id}", id or "")
+        lines[#lines + 1] = "/aad [ГЊГЏ] " .. e[k]:gsub("{id}", id or "")
     end
-    if prize ~= "" then lines[#lines + 1] = "/aad [МП] Приз победителю: " .. prize .. "." end
-    lines[#lines + 1] = "/aad [МП] Участие свободное для всех. Ждите открытия телепорта."
-    lines[#lines + 1] = "/aad [МП] Нарушители правил МП будут удалены без права на приз."
+    if prize ~= "" then lines[#lines + 1] = "/aad [ГЊГЏ] ГЏГ°ГЁГ§ ГЇГ®ГЎГҐГ¤ГЁГІГҐГ«Гѕ: " .. prize .. "." end
+    lines[#lines + 1] = "/aad [ГЊГЏ] Г“Г·Г Г±ГІГЁГҐ Г±ГўГ®ГЎГ®Г¤Г­Г®ГҐ Г¤Г«Гї ГўГ±ГҐГµ. Г†Г¤ГЁГІГҐ Г®ГІГЄГ°Г»ГІГЁГї ГІГҐГ«ГҐГЇГ®Г°ГІГ ."
+    lines[#lines + 1] = "/aad [ГЊГЏ] ГЌГ Г°ГіГёГЁГІГҐГ«ГЁ ГЇГ°Г ГўГЁГ« ГЊГЏ ГЎГіГ¤ГіГІ ГіГ¤Г Г«ГҐГ­Г» ГЎГҐГ§ ГЇГ°Г ГўГ  Г­Г  ГЇГ°ГЁГ§."
     sendSeq(lines, SEND_GAP, cfg.automp and function() armAutoMp() end or nil)
 end
 
 local function uiEvents()
     local t = {}
     for i, e in ipairs(EVENTS) do t[i] = string.format("{FFFFFF}%s {A9A9A9}(/ev %s)", e[2], e[1]) end
-    uiShow(D_EV, "FH | Мероприятия", table.concat(t, "\n"), "Объявить", "Закрыть", 2)
+    uiShow(D_EV, "FH | ГЊГҐГ°Г®ГЇГ°ГЁГїГІГЁГї", table.concat(t, "\n"), "ГЋГЎГєГїГўГЁГІГј", "Г‡Г ГЄГ°Г»ГІГј", 2)
 end
 
 uiHandlers[D_EV] = function(button, list)
@@ -1288,10 +1288,10 @@ uiHandlers[D_EV] = function(button, list)
     local e = EVENTS[list + 1]
     if not e then return end
     ui.evPick = e
-    uiShow(D_EVPRIZE, "FH | Приз для МП «" .. e[2] .. "»",
-        "{FFFFFF}Введите приз (можно оставить пустым).\n" ..
-        (e[1] == "infern" and "{FFCC00}Для этого МП: ID ведущего, затем приз. Пример: 55 5кк\n" or "{A9A9A9}Пример: 5кк"),
-        "Объявить", "Назад", 1)
+    uiShow(D_EVPRIZE, "FH | ГЏГ°ГЁГ§ Г¤Г«Гї ГЊГЏ В«" .. e[2] .. "В»",
+        "{FFFFFF}Г‚ГўГҐГ¤ГЁГІГҐ ГЇГ°ГЁГ§ (Г¬Г®Г¦Г­Г® Г®Г±ГІГ ГўГЁГІГј ГЇГіГ±ГІГ»Г¬).\n" ..
+        (e[1] == "infern" and "{FFCC00}Г„Г«Гї ГЅГІГ®ГЈГ® ГЊГЏ: ID ГўГҐГ¤ГіГ№ГҐГЈГ®, Г§Г ГІГҐГ¬ ГЇГ°ГЁГ§. ГЏГ°ГЁГ¬ГҐГ°: 55 5ГЄГЄ\n" or "{A9A9A9}ГЏГ°ГЁГ¬ГҐГ°: 5ГЄГЄ"),
+        "ГЋГЎГєГїГўГЁГІГј", "ГЌГ Г§Г Г¤", 1)
 end
 
 uiHandlers[D_EVPRIZE] = function(button, _, input)
@@ -1302,19 +1302,19 @@ uiHandlers[D_EVPRIZE] = function(button, _, input)
 end
 
 ----------------------------------------------------------------------
--- ФРАКЦИИ: наборы, отборы на лидера, временные лидерки
+-- Г”ГђГЂГЉГ–Г€Г€: Г­Г ГЎГ®Г°Г», Г®ГІГЎГ®Г°Г» Г­Г  Г«ГЁГ¤ГҐГ°Г , ГўГ°ГҐГ¬ГҐГ­Г­Г»ГҐ Г«ГЁГ¤ГҐГ°ГЄГЁ
 ----------------------------------------------------------------------
--- {ключ, название, id для /templeader, тип}
+-- {ГЄГ«ГѕГ·, Г­Г Г§ГўГ Г­ГЁГҐ, id Г¤Г«Гї /templeader, ГІГЁГЇ}
 local FRACTIONS = {
-    { "rus", "Русская мафия", 14, "mafia" }, { "jap", "Японская мафия", 6, "mafia" }, { "ita", "Итальянская мафия", 5, "mafia" },
-    { "fun", "Похоронное бюро", 23, "mafia" }, { "out", "Outlaws MC", 28, "mafia" },
+    { "rus", "ГђГіГ±Г±ГЄГ Гї Г¬Г ГґГЁГї", 14, "mafia" }, { "jap", "ГџГЇГ®Г­Г±ГЄГ Гї Г¬Г ГґГЁГї", 6, "mafia" }, { "ita", "Г€ГІГ Г«ГјГїГ­Г±ГЄГ Гї Г¬Г ГґГЁГї", 5, "mafia" },
+    { "fun", "ГЏГ®ГµГ®Г°Г®Г­Г­Г®ГҐ ГЎГѕГ°Г®", 23, "mafia" }, { "out", "Outlaws MC", 28, "mafia" },
     { "rif", "Rifa Gang", 18, "gang" }, { "bal", "Ballas Gang", 12, "gang" }, { "azt", "Aztec Gang", 17, "gang" },
     { "gro", "Grove Street", 15, "gang" }, { "vag", "LS Vagos", 13, "gang" },
-    { "arm", "Армия ЛС", 3, "gov" }, { "hos", "Больница ЛС", 4, "gov" }, { "mer", "Мэрия", 7, "gov" },
-    { "rad", "Радиоцентр", 16, "gov" }, { "swt", "S.W.A.T", 25, "gov" }, { "gov", "Правительство", 26, "gov" },
-    { "lsp", "LSPD", 1, "gov" }, { "fbi", "FBI", 2, "gov" }, { "rcp", "RCPD", 27, "gov" }, { "sud", "Верховный суд", 29, "gov" },
+    { "arm", "ГЂГ°Г¬ГЁГї Г‹Г‘", 3, "gov" }, { "hos", "ГЃГ®Г«ГјГ­ГЁГ¶Г  Г‹Г‘", 4, "gov" }, { "mer", "ГЊГЅГ°ГЁГї", 7, "gov" },
+    { "rad", "ГђГ Г¤ГЁГ®Г¶ГҐГ­ГІГ°", 16, "gov" }, { "swt", "S.W.A.T", 25, "gov" }, { "gov", "ГЏГ°Г ГўГЁГІГҐГ«ГјГ±ГІГўГ®", 26, "gov" },
+    { "lsp", "LSPD", 1, "gov" }, { "fbi", "FBI", 2, "gov" }, { "rcp", "RCPD", 27, "gov" }, { "sud", "Г‚ГҐГ°ГµГ®ГўГ­Г»Г© Г±ГіГ¤", 29, "gov" },
 }
-local RULES_BY_KIND = { mafia = "правил бизваров", gang = "правил каптов", gov = "общих правил лидеров" }
+local RULES_BY_KIND = { mafia = "ГЇГ°Г ГўГЁГ« ГЎГЁГ§ГўГ Г°Г®Гў", gang = "ГЇГ°Г ГўГЁГ« ГЄГ ГЇГІГ®Гў", gov = "Г®ГЎГ№ГЁГµ ГЇГ°Г ГўГЁГ« Г«ГЁГ¤ГҐГ°Г®Гў" }
 
 local function fractionByKey(key)
     key = lower1251(key or "")
@@ -1323,16 +1323,16 @@ end
 
 local function recruit(f)
     sendSeq({
-        "/o [Набор] Внимание! Открыт набор в «" .. f[2] .. "».",
-        "/o [Набор] Подайте заявку через /rep +.",
+        "/o [ГЌГ ГЎГ®Г°] Г‚Г­ГЁГ¬Г Г­ГЁГҐ! ГЋГІГЄГ°Г»ГІ Г­Г ГЎГ®Г° Гў В«" .. f[2] .. "В».",
+        "/o [ГЌГ ГЎГ®Г°] ГЏГ®Г¤Г Г©ГІГҐ Г§Г ГїГўГЄГі Г·ГҐГ°ГҐГ§ /rep +.",
     }, 2500)
 end
 
 local function tryoutAad(f)
     sendSeq({
-        "/aad [Отбор] Внимание! Проходит отбор на пост лидера: " .. f[2] .. ".",
-        "/aad [Отбор] Требования: возраст 13+, связь ВК, знание " .. RULES_BY_KIND[f[4]] .. ".",
-        "/aad [Отбор] Ждите открытия телепорта.",
+        "/aad [ГЋГІГЎГ®Г°] Г‚Г­ГЁГ¬Г Г­ГЁГҐ! ГЏГ°Г®ГµГ®Г¤ГЁГІ Г®ГІГЎГ®Г° Г­Г  ГЇГ®Г±ГІ Г«ГЁГ¤ГҐГ°Г : " .. f[2] .. ".",
+        "/aad [ГЋГІГЎГ®Г°] Г’Г°ГҐГЎГ®ГўГ Г­ГЁГї: ГўГ®Г§Г°Г Г±ГІ 13+, Г±ГўГїГ§Гј Г‚ГЉ, Г§Г­Г Г­ГЁГҐ " .. RULES_BY_KIND[f[4]] .. ".",
+        "/aad [ГЋГІГЎГ®Г°] Г†Г¤ГЁГІГҐ Г®ГІГЄГ°Г»ГІГЁГї ГІГҐГ«ГҐГЇГ®Г°ГІГ .",
     }, SEND_GAP, function()
         if cfg.automp then armAutoMp() else sampSetChatInputText("/mp ") sampSetChatInputEnabled(true) end
     end)
@@ -1340,9 +1340,9 @@ end
 
 local function tryoutO(f)
     sendSeq({
-        "/o [Отбор] Идёт отбор на пост лидера: " .. f[2] .. ".",
-        "/o [Отбор] Нужно: 13+, связь ВК, знание " .. RULES_BY_KIND[f[4]] .. ".",
-        "/o [Отбор] Желающие - пишите /gomp.",
+        "/o [ГЋГІГЎГ®Г°] Г€Г¤ВёГІ Г®ГІГЎГ®Г° Г­Г  ГЇГ®Г±ГІ Г«ГЁГ¤ГҐГ°Г : " .. f[2] .. ".",
+        "/o [ГЋГІГЎГ®Г°] ГЌГіГ¦Г­Г®: 13+, Г±ГўГїГ§Гј Г‚ГЉ, Г§Г­Г Г­ГЁГҐ " .. RULES_BY_KIND[f[4]] .. ".",
+        "/o [ГЋГІГЎГ®Г°] Г†ГҐГ«Г ГѕГ№ГЁГҐ - ГЇГЁГёГЁГІГҐ /gomp.",
     }, 2500, function()
         if cfg.automp then armAutoMp() else sampSetChatInputText("/mp ") sampSetChatInputEnabled(true) end
     end)
@@ -1353,7 +1353,7 @@ local function tempLeader(f) safeSend("/templeader " .. f[3]) end
 local function uiFractions()
     local t = {}
     for i, f in ipairs(FRACTIONS) do t[i] = string.format("{FFFFFF}%s {A9A9A9}(%s)", f[2], f[1]) end
-    uiShow(D_FR, "FH | Фракции", table.concat(t, "\n"), "Выбрать", "Закрыть", 2)
+    uiShow(D_FR, "FH | Г”Г°Г ГЄГ¶ГЁГЁ", table.concat(t, "\n"), "Г‚Г»ГЎГ°Г ГІГј", "Г‡Г ГЄГ°Г»ГІГј", 2)
 end
 
 uiHandlers[D_FR] = function(button, list)
@@ -1362,8 +1362,8 @@ uiHandlers[D_FR] = function(button, list)
     if not f then return uiFractions() end
     ui.fr = list + 1
     uiShow(D_FRACT, f[2],
-        "Набор (в общий чат /o)\nОтбор на лидера (/aad)\nОтбор на лидера (общий чат /o)\nВзять временную лидерку себе\nНазад",
-        "Выбрать", "Закрыть", 2)
+        "ГЌГ ГЎГ®Г° (Гў Г®ГЎГ№ГЁГ© Г·Г ГІ /o)\nГЋГІГЎГ®Г° Г­Г  Г«ГЁГ¤ГҐГ°Г  (/aad)\nГЋГІГЎГ®Г° Г­Г  Г«ГЁГ¤ГҐГ°Г  (Г®ГЎГ№ГЁГ© Г·Г ГІ /o)\nГ‚Г§ГїГІГј ГўГ°ГҐГ¬ГҐГ­Г­ГіГѕ Г«ГЁГ¤ГҐГ°ГЄГі Г±ГҐГЎГҐ\nГЌГ Г§Г Г¤",
+        "Г‚Г»ГЎГ°Г ГІГј", "Г‡Г ГЄГ°Г»ГІГј", 2)
 end
 
 uiHandlers[D_FRACT] = function(button, list)
@@ -1378,7 +1378,7 @@ uiHandlers[D_FRACT] = function(button, list)
 end
 
 ----------------------------------------------------------------------
--- ШПАРГАЛКИ: свои заметки (правила, ответы), хранятся в файле
+-- ГГЏГЂГђГѓГЂГ‹ГЉГ€: Г±ГўГ®ГЁ Г§Г Г¬ГҐГІГЄГЁ (ГЇГ°Г ГўГЁГ«Г , Г®ГІГўГҐГІГ»), ГµГ°Г Г­ГїГІГ±Гї Гў ГґГ Г©Г«ГҐ
 ----------------------------------------------------------------------
 local notes = {}   -- { {title=, lines={}}, ... }
 local NOTE_MAX, NOTE_LINES = 40, 30
@@ -1402,7 +1402,7 @@ local function saveNotes()
         end
         f:close()
     end)
-    if not ok then fmsg("Не удалось сохранить заметки в файл!") end
+    if not ok then fmsg("ГЌГҐ ГіГ¤Г Г«Г®Г±Гј Г±Г®ГµГ°Г Г­ГЁГІГј Г§Г Г¬ГҐГІГЄГЁ Гў ГґГ Г©Г«!") end
 end
 
 local function loadNotes()
@@ -1431,10 +1431,10 @@ end
 
 local function noteAdd(title, text)
     title = trim(title:gsub("[%[%]]", ""))
-    if title == "" or #title > 40 then return false, "Название: до 40 символов." end
+    if title == "" or #title > 40 then return false, "ГЌГ Г§ГўГ Г­ГЁГҐ: Г¤Г® 40 Г±ГЁГ¬ГўГ®Г«Г®Гў." end
     local n = findNote(title)
     if not n then
-        if #notes >= NOTE_MAX then return false, "Лимит заметок: " .. NOTE_MAX end
+        if #notes >= NOTE_MAX then return false, "Г‹ГЁГ¬ГЁГІ Г§Г Г¬ГҐГІГ®ГЄ: " .. NOTE_MAX end
         n = { title = title, lines = {} }
         notes[#notes + 1] = n
     end
@@ -1445,36 +1445,36 @@ local function noteAdd(title, text)
     end
     if added == 0 then
         if #n.lines == 0 then table.remove(notes) end
-        return false, "Пустой текст, ничего не добавлено."
+        return false, "ГЏГіГ±ГІГ®Г© ГІГҐГЄГ±ГІ, Г­ГЁГ·ГҐГЈГ® Г­ГҐ Г¤Г®ГЎГ ГўГ«ГҐГ­Г®."
     end
     saveNotes()
-    return true, string.format("Заметка «%s»: добавлено строк %d (всего %d).", n.title, added, #n.lines)
+    return true, string.format("Г‡Г Г¬ГҐГІГЄГ  В«%sВ»: Г¤Г®ГЎГ ГўГ«ГҐГ­Г® Г±ГІГ°Г®ГЄ %d (ГўГ±ГҐГЈГ® %d).", n.title, added, #n.lines)
 end
 
 local function uiNotes()
-    local t = { "{33CC33}[+] Новая заметка" }
-    for _, n in ipairs(notes) do t[#t + 1] = string.format("{FFFFFF}%s {A9A9A9}- строк: %d", n.title, #n.lines) end
-    uiShow(D_NOTES, "FH | Шпаргалки", table.concat(t, "\n"), "Открыть", "Закрыть", 2)
+    local t = { "{33CC33}[+] ГЌГ®ГўГ Гї Г§Г Г¬ГҐГІГЄГ " }
+    for _, n in ipairs(notes) do t[#t + 1] = string.format("{FFFFFF}%s {A9A9A9}- Г±ГІГ°Г®ГЄ: %d", n.title, #n.lines) end
+    uiShow(D_NOTES, "FH | ГГЇГ Г°ГЈГ Г«ГЄГЁ", table.concat(t, "\n"), "ГЋГІГЄГ°Г»ГІГј", "Г‡Г ГЄГ°Г»ГІГј", 2)
 end
 
 uiHandlers[D_NOTES] = function(button, list)
     if button == 0 then return end
     if list == 0 then
-        uiShow(D_NOTEADD, "Новая заметка",
-            "Формат: название | текст\nНесколько строк разделяйте {FFFF00};;\n{A9A9A9}Пример: Нормы | Будни - 1 час ;; Выходные - 1.5 часа",
-            "Сохранить", "Назад", 1)
+        uiShow(D_NOTEADD, "ГЌГ®ГўГ Гї Г§Г Г¬ГҐГІГЄГ ",
+            "Г”Г®Г°Г¬Г ГІ: Г­Г Г§ГўГ Г­ГЁГҐ | ГІГҐГЄГ±ГІ\nГЌГҐГ±ГЄГ®Г«ГјГЄГ® Г±ГІГ°Г®ГЄ Г°Г Г§Г¤ГҐГ«ГїГ©ГІГҐ {FFFF00};;\n{A9A9A9}ГЏГ°ГЁГ¬ГҐГ°: ГЌГ®Г°Г¬Г» | ГЃГіГ¤Г­ГЁ - 1 Г·Г Г± ;; Г‚Г»ГµГ®Г¤Г­Г»ГҐ - 1.5 Г·Г Г±Г ",
+            "Г‘Г®ГµГ°Г Г­ГЁГІГј", "ГЌГ Г§Г Г¤", 1)
     else
         local n = notes[list]
         if not n then return uiNotes() end
         ui.note = list
-        uiShow(D_NOTE, n.title, table.concat(n.lines, "\n"), "Назад", "Удалить", 0)
+        uiShow(D_NOTE, n.title, table.concat(n.lines, "\n"), "ГЌГ Г§Г Г¤", "Г“Г¤Г Г«ГЁГІГј", 0)
     end
 end
 
 uiHandlers[D_NOTEADD] = function(button, _, input)
     if button == 0 then return uiNotes() end
     local title, text = input:match("^(.-)%s*|%s*(.+)$")
-    if not title then fmsg("Формат: название | текст") return uiNotes() end
+    if not title then fmsg("Г”Г®Г°Г¬Г ГІ: Г­Г Г§ГўГ Г­ГЁГҐ | ГІГҐГЄГ±ГІ") return uiNotes() end
     local _, msg = noteAdd(title, text)
     fmsg(msg)
     uiNotes()
@@ -1482,7 +1482,7 @@ end
 
 uiHandlers[D_NOTE] = function(button)
     if button == 0 and ui.note and notes[ui.note] then
-        fmsg("Заметка «" .. notes[ui.note].title .. "» удалена.")
+        fmsg("Г‡Г Г¬ГҐГІГЄГ  В«" .. notes[ui.note].title .. "В» ГіГ¤Г Г«ГҐГ­Г .")
         table.remove(notes, ui.note)
         saveNotes()
     end
@@ -1490,11 +1490,11 @@ uiHandlers[D_NOTE] = function(button)
 end
 
 ----------------------------------------------------------------------
--- КОМАНДЫ-СОКРАЩЕНИЯ, ОПРОС, ТАЙМЕР РЕСПАВНА
+-- ГЉГЋГЊГЂГЌГ„Г›-Г‘ГЋГЉГђГЂГ™Г…ГЌГ€Гџ, ГЋГЏГђГЋГ‘, Г’ГЂГ‰ГЊГ…Гђ ГђГ…Г‘ГЏГЂГ‚ГЌГЂ
 ----------------------------------------------------------------------
--- {короткое имя, полная команда, режим}
--- args - нужны параметры; idin - вставить "/cmd ID " в строку ввода; idopt - ID из аргумента или из /re;
--- optargs - параметры необязательны; none - без параметров
+-- {ГЄГ®Г°Г®ГІГЄГ®ГҐ ГЁГ¬Гї, ГЇГ®Г«Г­Г Гї ГЄГ®Г¬Г Г­Г¤Г , Г°ГҐГ¦ГЁГ¬}
+-- args - Г­ГіГ¦Г­Г» ГЇГ Г°Г Г¬ГҐГІГ°Г»; idin - ГўГ±ГІГ ГўГЁГІГј "/cmd ID " Гў Г±ГІГ°Г®ГЄГі ГўГўГ®Г¤Г ; idopt - ID ГЁГ§ Г Г°ГЈГіГ¬ГҐГ­ГІГ  ГЁГ«ГЁ ГЁГ§ /re;
+-- optargs - ГЇГ Г°Г Г¬ГҐГІГ°Г» Г­ГҐГ®ГЎГїГ§Г ГІГҐГ«ГјГ­Г»; none - ГЎГҐГ§ ГЇГ Г°Г Г¬ГҐГІГ°Г®Гў
 local ALIASES = {
     { "jj", "jail", "idin" }, { "mut", "mute", "idin" }, { "ww", "warn", "idin" }, { "bb", "ban", "args" },
     { "uw", "unwarn", "args" }, { "uj", "unjail", "args" }, { "unm", "unmute", "args" }, { "ub", "unban", "args" },
@@ -1512,62 +1512,62 @@ local function regAlias(reg, a)
         if mode == "optargs" then safeSend(p == "" and ("/" .. full) or ("/" .. full .. " " .. p)) return end
         if mode == "idin" or mode == "idopt" then
             local id = p:match("^(%d+)") or watchedId
-            if not id then fmsg("Укажите ID: /" .. short .. " ID") return end
+            if not id then fmsg("Г“ГЄГ Г¦ГЁГІГҐ ID: /" .. short .. " ID") return end
             if mode == "idin" then
                 sampSetChatInputText(string.format("/%s %s ", full, id)) sampSetChatInputEnabled(true)
             else safeSend(string.format("/%s %s", full, id)) end
             return
         end
-        if p == "" then fmsg("Укажите параметры: /" .. short .. " ...") return end
+        if p == "" then fmsg("Г“ГЄГ Г¦ГЁГІГҐ ГЇГ Г°Г Г¬ГҐГІГ°Г»: /" .. short .. " ...") return end
         safeSend("/" .. full .. " " .. p)
     end)
 end
 
 local function cmdAr(id)
-    if not id then fmsg("Использование: /ar ID") return end
+    if not id then fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /ar ID") return end
     local text
     local name = "ID " .. id
     for _, r in ipairs(reports) do
         if r.id == id then text = r.text name = r.name .. "[" .. id .. "]" break end
     end
     sendSeq({
-        string.format("/pm %s Здравствуйте, ваша жалоба принята, передаю её администрации.", id),
-        "/a Коллеги, отвечаем на репорт!",
-        string.format("/a %s | Жалоба: %s", name, text or "текст не найден, смотрите /report"),
+        string.format("/pm %s Г‡Г¤Г°Г ГўГ±ГІГўГіГ©ГІГҐ, ГўГ ГёГ  Г¦Г Г«Г®ГЎГ  ГЇГ°ГЁГ­ГїГІГ , ГЇГҐГ°ГҐГ¤Г Гѕ ГҐВё Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г Г¶ГЁГЁ.", id),
+        "/a ГЉГ®Г«Г«ГҐГЈГЁ, Г®ГІГўГҐГ·Г ГҐГ¬ Г­Г  Г°ГҐГЇГ®Г°ГІ!",
+        string.format("/a %s | Г†Г Г«Г®ГЎГ : %s", name, text or "ГІГҐГЄГ±ГІ Г­ГҐ Г­Г Г©Г¤ГҐГ­, Г±Г¬Г®ГІГ°ГЁГІГҐ /report"),
     }, SEND_GAP)
 end
 
 ----------------------------------------------------------------------
--- ОБЪЯВЛЕНИЯ, ПАМЯТКИ И ПРОВЕРКИ
+-- ГЋГЃГљГџГ‚Г‹Г…ГЌГ€Гџ, ГЏГЂГЊГџГ’ГЉГ€ Г€ ГЏГђГЋГ‚Г…ГђГЉГ€
 ----------------------------------------------------------------------
 local D_RULES = 4150
 
 local D_CHK, D_CHKRES = 4151, 4152
 local ROLES = {
-    { "io", "ИО", "И.О. Основателя" }, { "zo", "ЗО", "Заместитель Основателя" }, { "po", "ПО", "Помощник Основателя" },
-    { "ks", "КС", "Куратор сервера" }, { "zks", "ЗКС", "Заместитель Куратора сервера" },
-    { "ga", "ГА", "Главный администратор" }, { "zga", "ЗГА", "Заместитель Главного администратора" },
-    { "gsg", "ГС госс", "Главный следящий за госс. структурами" }, { "gsgh", "ГС гетто", "Главный следящий за гетто" },
-    { "gsm", "ГС мафии", "Главный следящий за мафиями" },
-    { "zgsg", "ЗГС госс", "Заместитель Главного следящего за госс. структурами" },
-    { "zgsgh", "ЗГС гетто", "Заместитель Главного следящего за гетто" },
-    { "zgsm", "ЗГС мафии", "Заместитель Главного следящего за мафиями" },
-    { "pgsg", "ПГС госс", "Помощник Главного следящего за госс. структурами" },
-    { "pgsgh", "ПГС гетто", "Помощник Главного следящего за гетто" },
-    { "pgsm", "ПГС мафии", "Помощник Главного следящего за мафиями" },
+    { "io", "Г€ГЋ", "Г€.ГЋ. ГЋГ±Г­Г®ГўГ ГІГҐГ«Гї" }, { "zo", "Г‡ГЋ", "Г‡Г Г¬ГҐГ±ГІГЁГІГҐГ«Гј ГЋГ±Г­Г®ГўГ ГІГҐГ«Гї" }, { "po", "ГЏГЋ", "ГЏГ®Г¬Г®Г№Г­ГЁГЄ ГЋГ±Г­Г®ГўГ ГІГҐГ«Гї" },
+    { "ks", "ГЉГ‘", "ГЉГіГ°Г ГІГ®Г° Г±ГҐГ°ГўГҐГ°Г " }, { "zks", "Г‡ГЉГ‘", "Г‡Г Г¬ГҐГ±ГІГЁГІГҐГ«Гј ГЉГіГ°Г ГІГ®Г°Г  Г±ГҐГ°ГўГҐГ°Г " },
+    { "ga", "ГѓГЂ", "ГѓГ«Г ГўГ­Г»Г© Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°" }, { "zga", "Г‡ГѓГЂ", "Г‡Г Г¬ГҐГ±ГІГЁГІГҐГ«Гј ГѓГ«Г ГўГ­Г®ГЈГ® Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Г " },
+    { "gsg", "ГѓГ‘ ГЈГ®Г±Г±", "ГѓГ«Г ГўГ­Г»Г© Г±Г«ГҐГ¤ГїГ№ГЁГ© Г§Г  ГЈГ®Г±Г±. Г±ГІГ°ГіГЄГІГіГ°Г Г¬ГЁ" }, { "gsgh", "ГѓГ‘ ГЈГҐГІГІГ®", "ГѓГ«Г ГўГ­Г»Г© Г±Г«ГҐГ¤ГїГ№ГЁГ© Г§Г  ГЈГҐГІГІГ®" },
+    { "gsm", "ГѓГ‘ Г¬Г ГґГЁГЁ", "ГѓГ«Г ГўГ­Г»Г© Г±Г«ГҐГ¤ГїГ№ГЁГ© Г§Г  Г¬Г ГґГЁГїГ¬ГЁ" },
+    { "zgsg", "Г‡ГѓГ‘ ГЈГ®Г±Г±", "Г‡Г Г¬ГҐГ±ГІГЁГІГҐГ«Гј ГѓГ«Г ГўГ­Г®ГЈГ® Г±Г«ГҐГ¤ГїГ№ГҐГЈГ® Г§Г  ГЈГ®Г±Г±. Г±ГІГ°ГіГЄГІГіГ°Г Г¬ГЁ" },
+    { "zgsgh", "Г‡ГѓГ‘ ГЈГҐГІГІГ®", "Г‡Г Г¬ГҐГ±ГІГЁГІГҐГ«Гј ГѓГ«Г ГўГ­Г®ГЈГ® Г±Г«ГҐГ¤ГїГ№ГҐГЈГ® Г§Г  ГЈГҐГІГІГ®" },
+    { "zgsm", "Г‡ГѓГ‘ Г¬Г ГґГЁГЁ", "Г‡Г Г¬ГҐГ±ГІГЁГІГҐГ«Гј ГѓГ«Г ГўГ­Г®ГЈГ® Г±Г«ГҐГ¤ГїГ№ГҐГЈГ® Г§Г  Г¬Г ГґГЁГїГ¬ГЁ" },
+    { "pgsg", "ГЏГѓГ‘ ГЈГ®Г±Г±", "ГЏГ®Г¬Г®Г№Г­ГЁГЄ ГѓГ«Г ГўГ­Г®ГЈГ® Г±Г«ГҐГ¤ГїГ№ГҐГЈГ® Г§Г  ГЈГ®Г±Г±. Г±ГІГ°ГіГЄГІГіГ°Г Г¬ГЁ" },
+    { "pgsgh", "ГЏГѓГ‘ ГЈГҐГІГІГ®", "ГЏГ®Г¬Г®Г№Г­ГЁГЄ ГѓГ«Г ГўГ­Г®ГЈГ® Г±Г«ГҐГ¤ГїГ№ГҐГЈГ® Г§Г  ГЈГҐГІГІГ®" },
+    { "pgsm", "ГЏГѓГ‘ Г¬Г ГґГЁГЁ", "ГЏГ®Г¬Г®Г№Г­ГЁГЄ ГѓГ«Г ГўГ­Г®ГЈГ® Г±Г«ГҐГ¤ГїГ№ГҐГЈГ® Г§Г  Г¬Г ГґГЁГїГ¬ГЁ" },
 }
--- быстрые наборы должностей
+-- ГЎГ»Г±ГІГ°Г»ГҐ Г­Г ГЎГ®Г°Г» Г¤Г®Г«Г¦Г­Г®Г±ГІГҐГ©
 local CHK_PRESETS = {
-    { "Руководство", { "io", "zo", "po", "ks", "zks" } },
-    { "Следящие", { "gsg", "gsgh", "gsm", "zgsg", "zgsgh", "zgsm", "pgsg", "pgsgh", "pgsm" } },
-    { "ГА и ЗГА", { "ga", "zga" } },
-    { "Главные следящие", { "gsg", "gsgh", "gsm" } },
-    { "ЗГС", { "zgsg", "zgsgh", "zgsm" } },
-    { "ПГС", { "pgsg", "pgsgh", "pgsm" } },
-    { "Все", { "io", "zo", "po", "ks", "zks", "ga", "zga", "gsg", "gsgh", "gsm", "zgsg", "zgsgh", "zgsm", "pgsg", "pgsgh", "pgsm" } },
+    { "ГђГіГЄГ®ГўГ®Г¤Г±ГІГўГ®", { "io", "zo", "po", "ks", "zks" } },
+    { "Г‘Г«ГҐГ¤ГїГ№ГЁГҐ", { "gsg", "gsgh", "gsm", "zgsg", "zgsgh", "zgsm", "pgsg", "pgsgh", "pgsm" } },
+    { "ГѓГЂ ГЁ Г‡ГѓГЂ", { "ga", "zga" } },
+    { "ГѓГ«Г ГўГ­Г»ГҐ Г±Г«ГҐГ¤ГїГ№ГЁГҐ", { "gsg", "gsgh", "gsm" } },
+    { "Г‡ГѓГ‘", { "zgsg", "zgsgh", "zgsm" } },
+    { "ГЏГѓГ‘", { "pgsg", "pgsgh", "pgsm" } },
+    { "Г‚Г±ГҐ", { "io", "zo", "po", "ks", "zks", "ga", "zga", "gsg", "gsgh", "gsm", "zgsg", "zgsgh", "zgsm", "pgsg", "pgsgh", "pgsm" } },
 }
 
--- ход проверки: кто ответил в /a
+-- ГµГ®Г¤ ГЇГ°Г®ГўГҐГ°ГЄГЁ: ГЄГІГ® Г®ГІГўГҐГІГЁГ« Гў /a
 local CHK = { active = false, list = {}, seen = {}, word = "1", t0 = 0, total = 0, secs = 0, thread = nil, token = 0 }
 
 local function chkNames(keys)
@@ -1578,24 +1578,24 @@ local function chkNames(keys)
     return out
 end
 
--- строки объявления в /a (sel - полные названия должностей, пусто - общая проверка)
+-- Г±ГІГ°Г®ГЄГЁ Г®ГЎГєГїГўГ«ГҐГ­ГЁГї Гў /a (sel - ГЇГ®Г«Г­Г»ГҐ Г­Г Г§ГўГ Г­ГЁГї Г¤Г®Г«Г¦Г­Г®Г±ГІГҐГ©, ГЇГіГ±ГІГ® - Г®ГЎГ№Г Гї ГЇГ°Г®ГўГҐГ°ГЄГ )
 local function chkLines(sel, word, secs)
     word = trim(word or "")
     if word == "" then word = "1" end
     secs = tonumber(secs) or 0
-    local answer = (word == "1") and "цифру 1" or ("слово «" .. word .. "»")
-    local tail = secs > 0 and (" Время: " .. math.floor(secs) .. " сек.") or ""
-    local lines = { "/a Проверка активности администрации!" }
+    local answer = (word == "1") and "Г¶ГЁГґГ°Гі 1" or ("Г±Г«Г®ГўГ® В«" .. word .. "В»")
+    local tail = secs > 0 and (" Г‚Г°ГҐГ¬Гї: " .. math.floor(secs) .. " Г±ГҐГЄ.") or ""
+    local lines = { "/a ГЏГ°Г®ГўГҐГ°ГЄГ  Г ГЄГІГЁГўГ­Г®Г±ГІГЁ Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г Г¶ГЁГЁ!" }
     if sel and #sel > 0 then
-        -- строки собираем по длине в символах (сервер режет сообщение на 128 байтах)
+        -- Г±ГІГ°Г®ГЄГЁ Г±Г®ГЎГЁГ°Г ГҐГ¬ ГЇГ® Г¤Г«ГЁГ­ГҐ Гў Г±ГЁГ¬ГўГ®Г«Г Гµ (Г±ГҐГ°ГўГҐГ° Г°ГҐГ¦ГҐГІ Г±Г®Г®ГЎГ№ГҐГ­ГЁГҐ Г­Г  128 ГЎГ Г©ГІГ Гµ)
         local function clen(x)
-            if #"я" == 2 then return #x - select(2, x:gsub("[\128-\191]", "")) end
+            if #"Гї" == 2 then return #x - select(2, x:gsub("[\128-\191]", "")) end
             return #x
         end
         local cur, first = {}, true
         local function flush(last)
             if #cur == 0 then return end
-            lines[#lines + 1] = "/a " .. (first and "Отзываются: " or "") .. table.concat(cur, ", ") .. (last and "." or ",")
+            lines[#lines + 1] = "/a " .. (first and "ГЋГІГ§Г»ГўГ ГѕГІГ±Гї: " or "") .. table.concat(cur, ", ") .. (last and "." or ",")
             first, cur = false, {}
         end
         local used = 0
@@ -1605,41 +1605,41 @@ local function chkLines(sel, word, secs)
             cur[#cur + 1] = name
         end
         flush(true)
-        lines[#lines + 1] = "/a Поставьте свой тег и напишите в /a " .. answer .. "." .. tail
+        lines[#lines + 1] = "/a ГЏГ®Г±ГІГ ГўГјГІГҐ Г±ГўГ®Г© ГІГҐГЈ ГЁ Г­Г ГЇГЁГёГЁГІГҐ Гў /a " .. answer .. "." .. tail
     else
-        lines[#lines + 1] = "/a Главные и заместители главных следящих - поставьте свой тег."
-        lines[#lines + 1] = "/a Подтвердите присутствие: напишите в /a " .. answer .. "." .. tail
+        lines[#lines + 1] = "/a ГѓГ«Г ГўГ­Г»ГҐ ГЁ Г§Г Г¬ГҐГ±ГІГЁГІГҐГ«ГЁ ГЈГ«Г ГўГ­Г»Гµ Г±Г«ГҐГ¤ГїГ№ГЁГµ - ГЇГ®Г±ГІГ ГўГјГІГҐ Г±ГўГ®Г© ГІГҐГЈ."
+        lines[#lines + 1] = "/a ГЏГ®Г¤ГІГўГҐГ°Г¤ГЁГІГҐ ГЇГ°ГЁГ±ГіГІГ±ГІГўГЁГҐ: Г­Г ГЇГЁГёГЁГІГҐ Гў /a " .. answer .. "." .. tail
     end
     return lines, word, secs
 end
 
 local function chkResultText()
-    local t = { string.format("{FFFFFF}Отметились: {33CC33}%d", #CHK.list) }
-    t[#t + 1] = "{A9A9A9}Ответ: " .. CHK.word .. (CHK.active and "   (проверка идёт)" or "   (проверка закончена)")
+    local t = { string.format("{FFFFFF}ГЋГІГ¬ГҐГІГЁГ«ГЁГ±Гј: {33CC33}%d", #CHK.list) }
+    t[#t + 1] = "{A9A9A9}ГЋГІГўГҐГІ: " .. CHK.word .. (CHK.active and "   (ГЇГ°Г®ГўГҐГ°ГЄГ  ГЁГ¤ВёГІ)" or "   (ГЇГ°Г®ГўГҐГ°ГЄГ  Г§Г ГЄГ®Г­Г·ГҐГ­Г )")
     t[#t + 1] = ""
-    if #CHK.list == 0 then t[#t + 1] = "{A9A9A9}Пока никто не ответил." end
+    if #CHK.list == 0 then t[#t + 1] = "{A9A9A9}ГЏГ®ГЄГ  Г­ГЁГЄГІГ® Г­ГҐ Г®ГІГўГҐГІГЁГ«." end
     for i, e in ipairs(CHK.list) do
-        t[#t + 1] = string.format("{FFFFFF}%d. %s{A9A9A9}%s  - через %d сек.", i, e.name, e.id and ("[" .. e.id .. "]") or "", e.sec)
+        t[#t + 1] = string.format("{FFFFFF}%d. %s{A9A9A9}%s  - Г·ГҐГ°ГҐГ§ %d Г±ГҐГЄ.", i, e.name, e.id and ("[" .. e.id .. "]") or "", e.sec)
     end
     return table.concat(t, "\n")
 end
 
 local function chkShow()
-    uiShow(D_CHKRES, "FH | Итог проверки активности", chkResultText(), "Закрыть", "", 0)
+    uiShow(D_CHKRES, "FH | Г€ГІГ®ГЈ ГЇГ°Г®ГўГҐГ°ГЄГЁ Г ГЄГІГЁГўГ­Г®Г±ГІГЁ", chkResultText(), "Г‡Г ГЄГ°Г»ГІГј", "", 0)
 end
 uiHandlers[D_CHKRES] = function() end
 
--- конец проверки; announce - сообщить итог в /a
+-- ГЄГ®Г­ГҐГ¶ ГЇГ°Г®ГўГҐГ°ГЄГЁ; announce - Г±Г®Г®ГЎГ№ГЁГІГј ГЁГІГ®ГЈ Гў /a
 local function chkEnd(announce)
-    if not CHK.active then fmsg("Проверка не запущена.") return end
+    if not CHK.active then fmsg("ГЏГ°Г®ГўГҐГ°ГЄГ  Г­ГҐ Г§Г ГЇГіГ№ГҐГ­Г .") return end
     CHK.active = false
     CHK.token = CHK.token + 1
     if CHK.thread then pcall(function() CHK.thread:terminate() end) CHK.thread = nil end
-    fmsg(string.format("Проверка закончена. Отметились: %d (список: /chkres).", #CHK.list))
-    if announce then safeSend(string.format("/a Проверка активности завершена. Отметились: %d.", #CHK.list)) end
+    fmsg(string.format("ГЏГ°Г®ГўГҐГ°ГЄГ  Г§Г ГЄГ®Г­Г·ГҐГ­Г . ГЋГІГ¬ГҐГІГЁГ«ГЁГ±Гј: %d (Г±ГЇГЁГ±Г®ГЄ: /chkres).", #CHK.list))
+    if announce then safeSend(string.format("/a ГЏГ°Г®ГўГҐГ°ГЄГ  Г ГЄГІГЁГўГ­Г®Г±ГІГЁ Г§Г ГўГҐГ°ГёГҐГ­Г . ГЋГІГ¬ГҐГІГЁГ«ГЁГ±Гј: %d.", #CHK.list)) end
 end
 
--- вызывается для каждой строки чата: ищет ответы вида «Ник[ID]: 1»
+-- ГўГ»Г§Г»ГўГ ГҐГІГ±Гї Г¤Г«Гї ГЄГ Г¦Г¤Г®Г© Г±ГІГ°Г®ГЄГЁ Г·Г ГІГ : ГЁГ№ГҐГІ Г®ГІГўГҐГІГ» ГўГЁГ¤Г  В«ГЌГЁГЄ[ID]: 1В»
 local function chkCollect(text)
     if not CHK.active then return end
     local clean = text:gsub("{%x%x%x%x%x%x}", ""):gsub("%c", "")
@@ -1651,7 +1651,7 @@ local function chkCollect(text)
     CHK.list[#CHK.list + 1] = { name = name, id = id, sec = math.floor(os.clock() - CHK.t0) }
 end
 
--- sel: список названий должностей; opts: { word = "1", seconds = 60 }
+-- sel: Г±ГЇГЁГ±Г®ГЄ Г­Г Г§ГўГ Г­ГЁГ© Г¤Г®Г«Г¦Г­Г®Г±ГІГҐГ©; opts: { word = "1", seconds = 60 }
 local function sayA1(sel, opts)
     opts = opts or {}
     local lines, word, secs = chkLines(sel, opts.word, opts.seconds)
@@ -1680,7 +1680,7 @@ local function roleByToken(tok)
     end
 end
 
--- /a1 [должности] [t=секунд] [w=слово]
+-- /a1 [Г¤Г®Г«Г¦Г­Г®Г±ГІГЁ] [t=Г±ГҐГЄГіГ­Г¤] [w=Г±Г«Г®ГўГ®]
 local function sayA1Args(p)
     local sel, bad, opts = {}, {}, {}
     for tok in (p or ""):gmatch("[^%s,]+") do
@@ -1696,17 +1696,17 @@ local function sayA1Args(p)
     if #bad > 0 then
         local keys = {}
         for _, r in ipairs(ROLES) do keys[#keys + 1] = r[1] end
-        fmsg("Не знаю: " .. table.concat(bad, ", ") .. ". Ключи: " .. table.concat(keys, " ") .. " | t=60 w=слово")
+        fmsg("ГЌГҐ Г§Г­Г Гѕ: " .. table.concat(bad, ", ") .. ". ГЉГ«ГѕГ·ГЁ: " .. table.concat(keys, " ") .. " | t=60 w=Г±Г«Г®ГўГ®")
         return
     end
     sayA1(sel, opts)
 end
 
 local function uiChk()
-    local t = { "{33CC33}Общая проверка (без должностей)" }
-    for _, p in ipairs(CHK_PRESETS) do t[#t + 1] = "{66CCFF}Набор: {FFFFFF}" .. p[1] end
+    local t = { "{33CC33}ГЋГЎГ№Г Гї ГЇГ°Г®ГўГҐГ°ГЄГ  (ГЎГҐГ§ Г¤Г®Г«Г¦Г­Г®Г±ГІГҐГ©)" }
+    for _, p in ipairs(CHK_PRESETS) do t[#t + 1] = "{66CCFF}ГЌГ ГЎГ®Г°: {FFFFFF}" .. p[1] end
     for _, r in ipairs(ROLES) do t[#t + 1] = "{FFFFFF}" .. r[2] end
-    uiShow(D_CHK, "FH | Проверка активности", table.concat(t, "\n"), "Проверить", "Закрыть", 2)
+    uiShow(D_CHK, "FH | ГЏГ°Г®ГўГҐГ°ГЄГ  Г ГЄГІГЁГўГ­Г®Г±ГІГЁ", table.concat(t, "\n"), "ГЏГ°Г®ГўГҐГ°ГЁГІГј", "Г‡Г ГЄГ°Г»ГІГј", 2)
 end
 
 uiHandlers[D_CHK] = function(button, list)
@@ -1720,116 +1720,116 @@ end
 
 local function sayRules()
     sendSeq({
-        "Норма онлайна лидера: в будни 1 час, в выходные 1 час 30 минут.",
-        "Не отыграли норму - получаете выговор.",
-        "3/3 выговоров - снятие с поста лидера и ЧСЛ.",
-        "Час пик в будни: с 17:00 до 20:00.",
-        "Час пик в выходные: с 16:00 до 19:00.",
-        "Отсутствие в час пик тоже карается выговором.",
-        "Вопросы - к следящим вашей структуры.",
+        "ГЌГ®Г°Г¬Г  Г®Г­Г«Г Г©Г­Г  Г«ГЁГ¤ГҐГ°Г : Гў ГЎГіГ¤Г­ГЁ 1 Г·Г Г±, Гў ГўГ»ГµГ®Г¤Г­Г»ГҐ 1 Г·Г Г± 30 Г¬ГЁГ­ГіГІ.",
+        "ГЌГҐ Г®ГІГ»ГЈГ°Г Г«ГЁ Г­Г®Г°Г¬Гі - ГЇГ®Г«ГіГ·Г ГҐГІГҐ ГўГ»ГЈГ®ГўГ®Г°.",
+        "3/3 ГўГ»ГЈГ®ГўГ®Г°Г®Гў - Г±Г­ГїГІГЁГҐ Г± ГЇГ®Г±ГІГ  Г«ГЁГ¤ГҐГ°Г  ГЁ Г—Г‘Г‹.",
+        "Г—Г Г± ГЇГЁГЄ Гў ГЎГіГ¤Г­ГЁ: Г± 17:00 Г¤Г® 20:00.",
+        "Г—Г Г± ГЇГЁГЄ Гў ГўГ»ГµГ®Г¤Г­Г»ГҐ: Г± 16:00 Г¤Г® 19:00.",
+        "ГЋГІГ±ГіГІГ±ГІГўГЁГҐ Гў Г·Г Г± ГЇГЁГЄ ГІГ®Г¦ГҐ ГЄГ Г°Г ГҐГІГ±Гї ГўГ»ГЈГ®ГўГ®Г°Г®Г¬.",
+        "Г‚Г®ГЇГ°Г®Г±Г» - ГЄ Г±Г«ГҐГ¤ГїГ№ГЁГ¬ ГўГ ГёГҐГ© Г±ГІГ°ГіГЄГІГіГ°Г».",
     }, 3500)
 end
 
 local function sayInfo()
     sendSeq({
-        "/aad [INFO] Уважаемые игроки, администрация всегда на связи!",
-        "/aad [INFO] Нашли баг или нарушение - пишите в /rep.",
-        "/aad [INFO] Формулируйте вопрос или жалобу коротко и понятно.",
-        "/aad [INFO] За флуд, оффтоп и оскорбления в репорте выдаётся наказание.",
-        "/aad [INFO] Приятной игры!",
+        "/aad [INFO] Г“ГўГ Г¦Г ГҐГ¬Г»ГҐ ГЁГЈГ°Г®ГЄГЁ, Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г Г¶ГЁГї ГўГ±ГҐГЈГ¤Г  Г­Г  Г±ГўГїГ§ГЁ!",
+        "/aad [INFO] ГЌГ ГёГ«ГЁ ГЎГ ГЈ ГЁГ«ГЁ Г­Г Г°ГіГёГҐГ­ГЁГҐ - ГЇГЁГёГЁГІГҐ Гў /rep.",
+        "/aad [INFO] Г”Г®Г°Г¬ГіГ«ГЁГ°ГіГ©ГІГҐ ГўГ®ГЇГ°Г®Г± ГЁГ«ГЁ Г¦Г Г«Г®ГЎГі ГЄГ®Г°Г®ГІГЄГ® ГЁ ГЇГ®Г­ГїГІГ­Г®.",
+        "/aad [INFO] Г‡Г  ГґГ«ГіГ¤, Г®ГґГґГІГ®ГЇ ГЁ Г®Г±ГЄГ®Г°ГЎГ«ГҐГ­ГЁГї Гў Г°ГҐГЇГ®Г°ГІГҐ ГўГ»Г¤Г ВёГІГ±Гї Г­Г ГЄГ Г§Г Г­ГЁГҐ.",
+        "/aad [INFO] ГЏГ°ГЁГїГІГ­Г®Г© ГЁГЈГ°Г»!",
     }, SEND_GAP)
 end
 
 local function sayTimeInfo()
     sendSeq({
-        "/aad [INFO] Игроки, напоминаем об акции за онлайн!",
-        "/aad [INFO] Отыграйте час на сервере и получите приз.",
-        "/aad [INFO] Награду можно получать до 5 раз в день.",
-        "/aad [INFO] Проверить время и забрать приз: /rep time",
-        "/aad [INFO] С уважением, администрация проекта.",
+        "/aad [INFO] Г€ГЈГ°Г®ГЄГЁ, Г­Г ГЇГ®Г¬ГЁГ­Г ГҐГ¬ Г®ГЎ Г ГЄГ¶ГЁГЁ Г§Г  Г®Г­Г«Г Г©Г­!",
+        "/aad [INFO] ГЋГІГ»ГЈГ°Г Г©ГІГҐ Г·Г Г± Г­Г  Г±ГҐГ°ГўГҐГ°ГҐ ГЁ ГЇГ®Г«ГіГ·ГЁГІГҐ ГЇГ°ГЁГ§.",
+        "/aad [INFO] ГЌГ ГЈГ°Г Г¤Гі Г¬Г®Г¦Г­Г® ГЇГ®Г«ГіГ·Г ГІГј Г¤Г® 5 Г°Г Г§ Гў Г¤ГҐГ­Гј.",
+        "/aad [INFO] ГЏГ°Г®ГўГҐГ°ГЁГІГј ГўГ°ГҐГ¬Гї ГЁ Г§Г ГЎГ°Г ГІГј ГЇГ°ГЁГ§: /rep time",
+        "/aad [INFO] Г‘ ГіГўГ Г¦ГҐГ­ГЁГҐГ¬, Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г Г¶ГЁГї ГЇГ°Г®ГҐГЄГІГ .",
     }, SEND_GAP)
 end
 
 local function sayGwIntro(prize)
     prize = trim(prize or "")
     local lines = {
-        "/aad [Раздача] Внимание, игроки! Сейчас пройдёт быстрая раздача призов.",
-        "/aad [Раздача] Приготовьтесь писать кодовое слово в чат!",
+        "/aad [ГђГ Г§Г¤Г Г·Г ] Г‚Г­ГЁГ¬Г Г­ГЁГҐ, ГЁГЈГ°Г®ГЄГЁ! Г‘ГҐГ©Г·Г Г± ГЇГ°Г®Г©Г¤ВёГІ ГЎГ»Г±ГІГ°Г Гї Г°Г Г§Г¤Г Г·Г  ГЇГ°ГЁГ§Г®Гў.",
+        "/aad [ГђГ Г§Г¤Г Г·Г ] ГЏГ°ГЁГЈГ®ГІГ®ГўГјГІГҐГ±Гј ГЇГЁГ±Г ГІГј ГЄГ®Г¤Г®ГўГ®ГҐ Г±Г«Г®ГўГ® Гў Г·Г ГІ!",
     }
-    if prize ~= "" then lines[#lines + 1] = "/aad [Раздача] Приз: " .. prize .. "." end
+    if prize ~= "" then lines[#lines + 1] = "/aad [ГђГ Г§Г¤Г Г·Г ] ГЏГ°ГЁГ§: " .. prize .. "." end
     sendSeq(lines, SEND_GAP)
 end
 
 local RULES_TEXT = {
     capt = {
-        "FH | Правила каптов",
-        "{66CCFF}Разрешено\n" ..
-        "{FFFFFF}- слайды, полуслайды, +C, сбив переката\n" ..
-        "- крыши, на которые попадают в 2 прыжка или по лестнице\n" ..
-        "- слив вне квадрата после 5 минут капта\n" ..
-        "- капт куском или обрезом, машины для баррикад\n\n" ..
-        "{FF6666}Нельзя (1/3, спавн, джейл или варн)\n" ..
-        "{FFFFFF}- убийство или запрет входа в квадрат до 5 минут\n" ..
-        "- крыши выше 2 прыжков\n" ..
-        "- заходить в интерьер в бою, СК в интерьере банды\n" ..
-        "- обстрел респавна соперника\n" ..
-        "- маска, броня, аптечки, наркотики в бою\n" ..
-        "- чужой скин, если клист банды не совпадает со скином фракции\n\n" ..
-        "{FF6666}Тяжёлые нарушения\n" ..
-        "{FFFFFF}- ДНК, джетпак, дом на колёсах в квадрате: 1/3\n" ..
-        "- антифраг (суицид, релог, подстав под госников): 1/3\n" ..
-        "- отказ дать опру следящим или скрытие читов: варн и минус квадрат\n" ..
-        "- багоюз Double Kill, стрельба по колёсам: 2/3\n" ..
-        "- провокация на слив или СК у респавна: джейл 10 минут\n\n" ..
-        "{FFCC00}Лидерам банд\n" ..
-        "{FFFFFF}- в капте 1-3 ранги фракции или помеха третьей банды: 1/3 лидеру\n" ..
-        "- капт респы любой банды: выговор, отмена капта, минус 3 квадрата\n" ..
-        "- игнор капта или неприезд состава на забив: 1/3 лидеру",
+        "FH | ГЏГ°Г ГўГЁГ«Г  ГЄГ ГЇГІГ®Гў",
+        "{66CCFF}ГђГ Г§Г°ГҐГёГҐГ­Г®\n" ..
+        "{FFFFFF}- Г±Г«Г Г©Г¤Г», ГЇГ®Г«ГіГ±Г«Г Г©Г¤Г», +C, Г±ГЎГЁГў ГЇГҐГ°ГҐГЄГ ГІГ \n" ..
+        "- ГЄГ°Г»ГёГЁ, Г­Г  ГЄГ®ГІГ®Г°Г»ГҐ ГЇГ®ГЇГ Г¤Г ГѕГІ Гў 2 ГЇГ°Г»Г¦ГЄГ  ГЁГ«ГЁ ГЇГ® Г«ГҐГ±ГІГ­ГЁГ¶ГҐ\n" ..
+        "- Г±Г«ГЁГў ГўГ­ГҐ ГЄГўГ Г¤Г°Г ГІГ  ГЇГ®Г±Г«ГҐ 5 Г¬ГЁГ­ГіГІ ГЄГ ГЇГІГ \n" ..
+        "- ГЄГ ГЇГІ ГЄГіГ±ГЄГ®Г¬ ГЁГ«ГЁ Г®ГЎГ°ГҐГ§Г®Г¬, Г¬Г ГёГЁГ­Г» Г¤Г«Гї ГЎГ Г°Г°ГЁГЄГ Г¤\n\n" ..
+        "{FF6666}ГЌГҐГ«ГјГ§Гї (1/3, Г±ГЇГ ГўГ­, Г¤Г¦ГҐГ©Г« ГЁГ«ГЁ ГўГ Г°Г­)\n" ..
+        "{FFFFFF}- ГіГЎГЁГ©Г±ГІГўГ® ГЁГ«ГЁ Г§Г ГЇГ°ГҐГІ ГўГµГ®Г¤Г  Гў ГЄГўГ Г¤Г°Г ГІ Г¤Г® 5 Г¬ГЁГ­ГіГІ\n" ..
+        "- ГЄГ°Г»ГёГЁ ГўГ»ГёГҐ 2 ГЇГ°Г»Г¦ГЄГ®Гў\n" ..
+        "- Г§Г ГµГ®Г¤ГЁГІГј Гў ГЁГ­ГІГҐГ°ГјГҐГ° Гў ГЎГ®Гѕ, Г‘ГЉ Гў ГЁГ­ГІГҐГ°ГјГҐГ°ГҐ ГЎГ Г­Г¤Г»\n" ..
+        "- Г®ГЎГ±ГІГ°ГҐГ« Г°ГҐГ±ГЇГ ГўГ­Г  Г±Г®ГЇГҐГ°Г­ГЁГЄГ \n" ..
+        "- Г¬Г Г±ГЄГ , ГЎГ°Г®Г­Гї, Г ГЇГІГҐГ·ГЄГЁ, Г­Г Г°ГЄГ®ГІГЁГЄГЁ Гў ГЎГ®Гѕ\n" ..
+        "- Г·ГіГ¦Г®Г© Г±ГЄГЁГ­, ГҐГ±Г«ГЁ ГЄГ«ГЁГ±ГІ ГЎГ Г­Г¤Г» Г­ГҐ Г±Г®ГўГЇГ Г¤Г ГҐГІ Г±Г® Г±ГЄГЁГ­Г®Г¬ ГґГ°Г ГЄГ¶ГЁГЁ\n\n" ..
+        "{FF6666}Г’ГїГ¦ВёГ«Г»ГҐ Г­Г Г°ГіГёГҐГ­ГЁГї\n" ..
+        "{FFFFFF}- Г„ГЌГЉ, Г¤Г¦ГҐГІГЇГ ГЄ, Г¤Г®Г¬ Г­Г  ГЄГ®Г«ВёГ±Г Гµ Гў ГЄГўГ Г¤Г°Г ГІГҐ: 1/3\n" ..
+        "- Г Г­ГІГЁГґГ°Г ГЈ (Г±ГіГЁГ¶ГЁГ¤, Г°ГҐГ«Г®ГЈ, ГЇГ®Г¤Г±ГІГ Гў ГЇГ®Г¤ ГЈГ®Г±Г­ГЁГЄГ®Гў): 1/3\n" ..
+        "- Г®ГІГЄГ Г§ Г¤Г ГІГј Г®ГЇГ°Гі Г±Г«ГҐГ¤ГїГ№ГЁГ¬ ГЁГ«ГЁ Г±ГЄГ°Г»ГІГЁГҐ Г·ГЁГІГ®Гў: ГўГ Г°Г­ ГЁ Г¬ГЁГ­ГіГ± ГЄГўГ Г¤Г°Г ГІ\n" ..
+        "- ГЎГ ГЈГ®ГѕГ§ Double Kill, Г±ГІГ°ГҐГ«ГјГЎГ  ГЇГ® ГЄГ®Г«ВёГ±Г Г¬: 2/3\n" ..
+        "- ГЇГ°Г®ГўГ®ГЄГ Г¶ГЁГї Г­Г  Г±Г«ГЁГў ГЁГ«ГЁ Г‘ГЉ Гі Г°ГҐГ±ГЇГ ГўГ­Г : Г¤Г¦ГҐГ©Г« 10 Г¬ГЁГ­ГіГІ\n\n" ..
+        "{FFCC00}Г‹ГЁГ¤ГҐГ°Г Г¬ ГЎГ Г­Г¤\n" ..
+        "{FFFFFF}- Гў ГЄГ ГЇГІГҐ 1-3 Г°Г Г­ГЈГЁ ГґГ°Г ГЄГ¶ГЁГЁ ГЁГ«ГЁ ГЇГ®Г¬ГҐГµГ  ГІГ°ГҐГІГјГҐГ© ГЎГ Г­Г¤Г»: 1/3 Г«ГЁГ¤ГҐГ°Гі\n" ..
+        "- ГЄГ ГЇГІ Г°ГҐГ±ГЇГ» Г«ГѕГЎГ®Г© ГЎГ Г­Г¤Г»: ГўГ»ГЈГ®ГўГ®Г°, Г®ГІГ¬ГҐГ­Г  ГЄГ ГЇГІГ , Г¬ГЁГ­ГіГ± 3 ГЄГўГ Г¤Г°Г ГІГ \n" ..
+        "- ГЁГЈГ­Г®Г° ГЄГ ГЇГІГ  ГЁГ«ГЁ Г­ГҐГЇГ°ГЁГҐГ§Г¤ Г±Г®Г±ГІГ ГўГ  Г­Г  Г§Г ГЎГЁГў: 1/3 Г«ГЁГ¤ГҐГ°Гі",
     },
     biz = {
-        "FH | Правила бизваров",
-        "{66CCFF}Общее\n" ..
-        "{FFFFFF}- забивать стрелу могут только лидер или заместитель, за 30+ минут через ВК\n" ..
-        "- время стрел: с 12:00 до 22:00 по Москве, минимум 2 на 2\n" ..
-        "- длительность 10 минут, нужна опра от лидера и зама, если нет следящих\n" ..
-        "- 3/3 у мафии: фракция теряет 1 бизнес\n\n" ..
-        "{FF6666}Нельзя (1/3)\n" ..
-        "{FFFFFF}- крыши и горы, стрельба по машине при въезде врага\n" ..
-        "- тянуть время вне квадрата, кататься в квадрате на машине дольше 10 секунд (1/3 и спавн)\n" ..
-        "- чужой скин, помощь посторонних (мафии сразу 3/3)\n" ..
-        "- АФК больше 30 секунд, вертолёт или личный транспорт, не впускать врага в квадрат\n" ..
-        "- выход из квадрата, маска, броня, оружие кроме Desert Eagle, M4, Shotgun, Rifle\n" ..
-        "- SK, DB, TK, слив или стрельба вне квадрата, игнор стрелы и следящих\n" ..
-        "- антифраг: прыжок с моста или горы, суицид\n\n" ..
-        "{FF6666}Тяжёлые нарушения\n" ..
-        "{FFFFFF}- баги, сбив анимаций в бою: 2/3\n" ..
-        "- стрельба с пассажирского сиденья: 1/3 и джейл 10 минут\n" ..
-        "- стрела вне 12:00-22:00: остановка стрелы и выговор лидеру",
+        "FH | ГЏГ°Г ГўГЁГ«Г  ГЎГЁГ§ГўГ Г°Г®Гў",
+        "{66CCFF}ГЋГЎГ№ГҐГҐ\n" ..
+        "{FFFFFF}- Г§Г ГЎГЁГўГ ГІГј Г±ГІГ°ГҐГ«Гі Г¬Г®ГЈГіГІ ГІГ®Г«ГјГЄГ® Г«ГЁГ¤ГҐГ° ГЁГ«ГЁ Г§Г Г¬ГҐГ±ГІГЁГІГҐГ«Гј, Г§Г  30+ Г¬ГЁГ­ГіГІ Г·ГҐГ°ГҐГ§ Г‚ГЉ\n" ..
+        "- ГўГ°ГҐГ¬Гї Г±ГІГ°ГҐГ«: Г± 12:00 Г¤Г® 22:00 ГЇГ® ГЊГ®Г±ГЄГўГҐ, Г¬ГЁГ­ГЁГ¬ГіГ¬ 2 Г­Г  2\n" ..
+        "- Г¤Г«ГЁГІГҐГ«ГјГ­Г®Г±ГІГј 10 Г¬ГЁГ­ГіГІ, Г­ГіГ¦Г­Г  Г®ГЇГ°Г  Г®ГІ Г«ГЁГ¤ГҐГ°Г  ГЁ Г§Г Г¬Г , ГҐГ±Г«ГЁ Г­ГҐГІ Г±Г«ГҐГ¤ГїГ№ГЁГµ\n" ..
+        "- 3/3 Гі Г¬Г ГґГЁГЁ: ГґГ°Г ГЄГ¶ГЁГї ГІГҐГ°ГїГҐГІ 1 ГЎГЁГ§Г­ГҐГ±\n\n" ..
+        "{FF6666}ГЌГҐГ«ГјГ§Гї (1/3)\n" ..
+        "{FFFFFF}- ГЄГ°Г»ГёГЁ ГЁ ГЈГ®Г°Г», Г±ГІГ°ГҐГ«ГјГЎГ  ГЇГ® Г¬Г ГёГЁГ­ГҐ ГЇГ°ГЁ ГўГєГҐГ§Г¤ГҐ ГўГ°Г ГЈГ \n" ..
+        "- ГІГїГ­ГіГІГј ГўГ°ГҐГ¬Гї ГўГ­ГҐ ГЄГўГ Г¤Г°Г ГІГ , ГЄГ ГІГ ГІГјГ±Гї Гў ГЄГўГ Г¤Г°Г ГІГҐ Г­Г  Г¬Г ГёГЁГ­ГҐ Г¤Г®Г«ГјГёГҐ 10 Г±ГҐГЄГіГ­Г¤ (1/3 ГЁ Г±ГЇГ ГўГ­)\n" ..
+        "- Г·ГіГ¦Г®Г© Г±ГЄГЁГ­, ГЇГ®Г¬Г®Г№Гј ГЇГ®Г±ГІГ®Г°Г®Г­Г­ГЁГµ (Г¬Г ГґГЁГЁ Г±Г°Г Г§Гі 3/3)\n" ..
+        "- ГЂГ”ГЉ ГЎГ®Г«ГјГёГҐ 30 Г±ГҐГЄГіГ­Г¤, ГўГҐГ°ГІГ®Г«ВёГІ ГЁГ«ГЁ Г«ГЁГ·Г­Г»Г© ГІГ°Г Г­Г±ГЇГ®Г°ГІ, Г­ГҐ ГўГЇГіГ±ГЄГ ГІГј ГўГ°Г ГЈГ  Гў ГЄГўГ Г¤Г°Г ГІ\n" ..
+        "- ГўГ»ГµГ®Г¤ ГЁГ§ ГЄГўГ Г¤Г°Г ГІГ , Г¬Г Г±ГЄГ , ГЎГ°Г®Г­Гї, Г®Г°ГіГ¦ГЁГҐ ГЄГ°Г®Г¬ГҐ Desert Eagle, M4, Shotgun, Rifle\n" ..
+        "- SK, DB, TK, Г±Г«ГЁГў ГЁГ«ГЁ Г±ГІГ°ГҐГ«ГјГЎГ  ГўГ­ГҐ ГЄГўГ Г¤Г°Г ГІГ , ГЁГЈГ­Г®Г° Г±ГІГ°ГҐГ«Г» ГЁ Г±Г«ГҐГ¤ГїГ№ГЁГµ\n" ..
+        "- Г Г­ГІГЁГґГ°Г ГЈ: ГЇГ°Г»Г¦Г®ГЄ Г± Г¬Г®Г±ГІГ  ГЁГ«ГЁ ГЈГ®Г°Г», Г±ГіГЁГ¶ГЁГ¤\n\n" ..
+        "{FF6666}Г’ГїГ¦ВёГ«Г»ГҐ Г­Г Г°ГіГёГҐГ­ГЁГї\n" ..
+        "{FFFFFF}- ГЎГ ГЈГЁ, Г±ГЎГЁГў Г Г­ГЁГ¬Г Г¶ГЁГ© Гў ГЎГ®Гѕ: 2/3\n" ..
+        "- Г±ГІГ°ГҐГ«ГјГЎГ  Г± ГЇГ Г±Г±Г Г¦ГЁГ°Г±ГЄГ®ГЈГ® Г±ГЁГ¤ГҐГ­ГјГї: 1/3 ГЁ Г¤Г¦ГҐГ©Г« 10 Г¬ГЁГ­ГіГІ\n" ..
+        "- Г±ГІГ°ГҐГ«Г  ГўГ­ГҐ 12:00-22:00: Г®Г±ГІГ Г­Г®ГўГЄГ  Г±ГІГ°ГҐГ«Г» ГЁ ГўГ»ГЈГ®ГўГ®Г° Г«ГЁГ¤ГҐГ°Гі",
     },
 }
 
 local function showRules(kind)
     local r = RULES_TEXT[kind]
-    if r then uiShow(D_RULES, r[1], r[2], "Закрыть", "", 0) end
+    if r then uiShow(D_RULES, r[1], r[2], "Г‡Г ГЄГ°Г»ГІГј", "", 0) end
 end
 uiHandlers[D_RULES] = function() end
 
 local VOPROS = {
-    { "Что такое ЧП?", "ЧП - час пик, обязательное время онлайна лидеров." },
-    { "Какая норма онлайна у лидера в будни?", "В будни норма - 1 час." },
-    { "Какая норма онлайна у лидера в выходные?", "В выходные норма - 1 час 30 минут." },
-    { "Что обязан делать лидер фракции?", "Следить за фракцией, форумом и составом." },
-    { "Что такое блат?", "Блат - выдача высокой должности без отчётов и обзвона." },
-    { "Со скольки до скольки ЧП в будни?", "В будни ЧП с 17:00 до 20:00." },
-    { "Со скольки до скольки ЧП в выходные?", "В выходные ЧП с 16:00 до 19:00." },
+    { "Г—ГІГ® ГІГ ГЄГ®ГҐ Г—ГЏ?", "Г—ГЏ - Г·Г Г± ГЇГЁГЄ, Г®ГЎГїГ§Г ГІГҐГ«ГјГ­Г®ГҐ ГўГ°ГҐГ¬Гї Г®Г­Г«Г Г©Г­Г  Г«ГЁГ¤ГҐГ°Г®Гў." },
+    { "ГЉГ ГЄГ Гї Г­Г®Г°Г¬Г  Г®Г­Г«Г Г©Г­Г  Гі Г«ГЁГ¤ГҐГ°Г  Гў ГЎГіГ¤Г­ГЁ?", "Г‚ ГЎГіГ¤Г­ГЁ Г­Г®Г°Г¬Г  - 1 Г·Г Г±." },
+    { "ГЉГ ГЄГ Гї Г­Г®Г°Г¬Г  Г®Г­Г«Г Г©Г­Г  Гі Г«ГЁГ¤ГҐГ°Г  Гў ГўГ»ГµГ®Г¤Г­Г»ГҐ?", "Г‚ ГўГ»ГµГ®Г¤Г­Г»ГҐ Г­Г®Г°Г¬Г  - 1 Г·Г Г± 30 Г¬ГЁГ­ГіГІ." },
+    { "Г—ГІГ® Г®ГЎГїГ§Г Г­ Г¤ГҐГ«Г ГІГј Г«ГЁГ¤ГҐГ° ГґГ°Г ГЄГ¶ГЁГЁ?", "Г‘Г«ГҐГ¤ГЁГІГј Г§Г  ГґГ°Г ГЄГ¶ГЁГҐГ©, ГґГ®Г°ГіГ¬Г®Г¬ ГЁ Г±Г®Г±ГІГ ГўГ®Г¬." },
+    { "Г—ГІГ® ГІГ ГЄГ®ГҐ ГЎГ«Г ГІ?", "ГЃГ«Г ГІ - ГўГ»Г¤Г Г·Г  ГўГ»Г±Г®ГЄГ®Г© Г¤Г®Г«Г¦Г­Г®Г±ГІГЁ ГЎГҐГ§ Г®ГІГ·ВёГІГ®Гў ГЁ Г®ГЎГ§ГўГ®Г­Г ." },
+    { "Г‘Г® Г±ГЄГ®Г«ГјГЄГЁ Г¤Г® Г±ГЄГ®Г«ГјГЄГЁ Г—ГЏ Гў ГЎГіГ¤Г­ГЁ?", "Г‚ ГЎГіГ¤Г­ГЁ Г—ГЏ Г± 17:00 Г¤Г® 20:00." },
+    { "Г‘Г® Г±ГЄГ®Г«ГјГЄГЁ Г¤Г® Г±ГЄГ®Г«ГјГЄГЁ Г—ГЏ Гў ГўГ»ГµГ®Г¤Г­Г»ГҐ?", "Г‚ ГўГ»ГµГ®Г¤Г­Г»ГҐ Г—ГЏ Г± 16:00 Г¤Г® 19:00." },
 }
 
 local function askVopros(p)
     local n = tonumber((p or ""):match("^%d+"))
     local v = n and VOPROS[n]
-    if not v then fmsg("Использование: /vopros 1-" .. #VOPROS .. " (вопрос лидеру в чат, ответ покажу вам).") return end
+    if not v then fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /vopros 1-" .. #VOPROS .. " (ГўГ®ГЇГ°Г®Г± Г«ГЁГ¤ГҐГ°Гі Гў Г·Г ГІ, Г®ГІГўГҐГІ ГЇГ®ГЄГ Г¦Гі ГўГ Г¬).") return end
     safeSend(v[1])
-    fmsg("Ответ: " .. v[2])
+    fmsg("ГЋГІГўГҐГІ: " .. v[2])
 end
 
 local INFO = {
@@ -1837,12 +1837,12 @@ local INFO = {
     capt = function() showRules("capt") end, biz = function() showRules("biz") end, q = askVopros,
 }
 local vrThread
--- удаление админ-каров всегда с предупреждением в /a и таймером 15 с
+-- ГіГ¤Г Г«ГҐГ­ГЁГҐ Г Г¤Г¬ГЁГ­-ГЄГ Г°Г®Гў ГўГ±ГҐГЈГ¤Г  Г± ГЇГ°ГҐГ¤ГіГЇГ°ГҐГ¦Г¤ГҐГ­ГЁГҐГ¬ Гў /a ГЁ ГІГ Г©Г¬ГҐГ°Г®Г¬ 15 Г±
 local function dvTimer(spawn)
-    if vrThread then fmsg("Таймер уже идёт (остановить: /vrstop).") return end
+    if vrThread then fmsg("Г’Г Г©Г¬ГҐГ° ГіГ¦ГҐ ГЁГ¤ВёГІ (Г®Г±ГІГ Г­Г®ГўГЁГІГј: /vrstop).") return end
     vrThread = lua_thread.create(function()
         pcall(function()
-            safeSend("/a Через 15 секунд админ-транспорт будет удалён" .. (spawn and " и весь транспорт сервера возвращён на места!" or "!"))
+            safeSend("/a Г—ГҐГ°ГҐГ§ 15 Г±ГҐГЄГіГ­Г¤ Г Г¤Г¬ГЁГ­-ГІГ°Г Г­Г±ГЇГ®Г°ГІ ГЎГіГ¤ГҐГІ ГіГ¤Г Г«ВёГ­" .. (spawn and " ГЁ ГўГҐГ±Гј ГІГ°Г Г­Г±ГЇГ®Г°ГІ Г±ГҐГ°ГўГҐГ°Г  ГўГ®Г§ГўГ°Г Г№ВёГ­ Г­Г  Г¬ГҐГ±ГІГ !" or "!"))
             wait(15000)
             safeSend("/dvall")
             if spawn then wait(1500) safeSend("/spawncars") end
@@ -1854,12 +1854,12 @@ local function registerExtra(reg)
     reg("ev", function(p)
         local key, arg = p:match("^(%S+)%s*(.*)$")
         local e = key and eventByKey(key)
-        if e then announceEvent(e, arg) elseif key then fmsg("Нет такого МП: " .. key .. ". Список: /ev") else uiEvents() end
+        if e then announceEvent(e, arg) elseif key then fmsg("ГЌГҐГІ ГІГ ГЄГ®ГЈГ® ГЊГЏ: " .. key .. ". Г‘ГЇГЁГ±Г®ГЄ: /ev") else uiEvents() end
     end)
     local function byKey(cmd, fn)
         reg(cmd, function(p)
             local f = fractionByKey(trim(p))
-            if f then fn(f) else fmsg("Укажите фракцию: /" .. cmd .. " ключ (список ключей: /fr)") end
+            if f then fn(f) else fmsg("Г“ГЄГ Г¦ГЁГІГҐ ГґГ°Г ГЄГ¶ГЁГѕ: /" .. cmd .. " ГЄГ«ГѕГ· (Г±ГЇГЁГ±Г®ГЄ ГЄГ«ГѕГ·ГҐГ©: /fr)") end
         end)
     end
     byKey("nab", recruit) byKey("otb", tryoutAad) byKey("otbo", tryoutO) byKey("tlead", tempLeader)
@@ -1869,16 +1869,16 @@ local function registerExtra(reg)
         local sub, rest = p:match("^(%S+)%s*(.*)$")
         if sub == "add" then
             local title, text = rest:match("^(.-)%s*|%s*(.+)$")
-            if not title then fmsg("Использование: /note add название | текст") return end
+            if not title then fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /note add Г­Г Г§ГўГ Г­ГЁГҐ | ГІГҐГЄГ±ГІ") return end
             local _, msg = noteAdd(title, text) fmsg(msg)
         elseif sub == "del" then
             local n, i = findNote(rest)
-            if not n then fmsg("Заметка не найдена.") return end
-            table.remove(notes, i) saveNotes() fmsg("Заметка удалена.")
+            if not n then fmsg("Г‡Г Г¬ГҐГІГЄГ  Г­ГҐ Г­Г Г©Г¤ГҐГ­Г .") return end
+            table.remove(notes, i) saveNotes() fmsg("Г‡Г Г¬ГҐГІГЄГ  ГіГ¤Г Г«ГҐГ­Г .")
         elseif sub == "show" then
             local n = findNote(rest)
-            if not n then fmsg("Заметка не найдена.") return end
-            uiShow(D_NOTE, n.title, table.concat(n.lines, "\n"), "Назад", "Закрыть", 0)
+            if not n then fmsg("Г‡Г Г¬ГҐГІГЄГ  Г­ГҐ Г­Г Г©Г¤ГҐГ­Г .") return end
+            uiShow(D_NOTE, n.title, table.concat(n.lines, "\n"), "ГЌГ Г§Г Г¤", "Г‡Г ГЄГ°Г»ГІГј", 0)
         else uiNotes() end
     end)
     reg("notes", uiNotes)
@@ -1887,10 +1887,10 @@ local function registerExtra(reg)
 
     reg("poll", function(p)
         local who = trim(p)
-        if who == "" then fmsg("Использование: /poll должность и ник (например: /poll ГА Ivan_Ivanov)") return end
+        if who == "" then fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /poll Г¤Г®Г«Г¦Г­Г®Г±ГІГј ГЁ Г­ГЁГЄ (Г­Г ГЇГ°ГЁГ¬ГҐГ°: /poll ГѓГЂ Ivan_Ivanov)") return end
         sendSeq({
-            "/aad [Опрос] Игроки, уделите минуту!",
-            "/aad [Опрос] Оцените работу: " .. who .. ". Отправьте в /rep цифру от 1 до 5.",
+            "/aad [ГЋГЇГ°Г®Г±] Г€ГЈГ°Г®ГЄГЁ, ГіГ¤ГҐГ«ГЁГІГҐ Г¬ГЁГ­ГіГІГі!",
+            "/aad [ГЋГЇГ°Г®Г±] ГЋГ¶ГҐГ­ГЁГІГҐ Г°Г ГЎГ®ГІГі: " .. who .. ". ГЋГІГЇГ°Г ГўГјГІГҐ Гў /rep Г¶ГЁГґГ°Гі Г®ГІ 1 Г¤Г® 5.",
         }, SEND_GAP)
     end)
 
@@ -1903,7 +1903,7 @@ local function registerExtra(reg)
         for _, c in ipairs(CLAIMS) do
             if c[1] == lk then claim(c[2], rest) return end
         end
-        claim(p)   -- свой текст: /z o otbor mp
+        claim(p)   -- Г±ГўГ®Г© ГІГҐГЄГ±ГІ: /z o otbor mp
     end)
     reg("vr", function() dvTimer(true) end)
     reg("dva", function() dvTimer(false) end)
@@ -1914,19 +1914,19 @@ local function registerExtra(reg)
     reg("fhupd", function(p) UPD.cmd(p) end)
     reg("fhdiag", function()
         local g = guiState and guiState.diag()
-        fmsg("Кодировка: " .. (enc8 and "библиотека encoding" or "запасная (encoding не найдена)"))
-        fmsg("Окно /fh: " .. (g and (g.disabled and "отключено из-за ошибок" or g.init and "не запустилось" or "готово") or "недоступно (нет mimgui)"))
+        fmsg("ГЉГ®Г¤ГЁГ°Г®ГўГЄГ : " .. (enc8 and "ГЎГЁГЎГ«ГЁГ®ГІГҐГЄГ  encoding" or "Г§Г ГЇГ Г±Г­Г Гї (encoding Г­ГҐ Г­Г Г©Г¤ГҐГ­Г )"))
+        fmsg("ГЋГЄГ­Г® /fh: " .. (g and (g.disabled and "Г®ГІГЄГ«ГѕГ·ГҐГ­Г® ГЁГ§-Г§Г  Г®ГёГЁГЎГ®ГЄ" or g.init and "Г­ГҐ Г§Г ГЇГіГ±ГІГЁГ«Г®Г±Гј" or "ГЈГ®ГІГ®ГўГ®") or "Г­ГҐГ¤Г®Г±ГІГіГЇГ­Г® (Г­ГҐГІ mimgui)"))
         local ti = guiState and guiState.tagInfo()
-        fmsg("Метка над игроком: " .. (ti and ((ti.off and ("ошибка: " .. tostring(ti.err))) or ("способ " .. (ti.mode == 0 and "imgui" or "render") .. (ti.id and (", игрок найден (ID " .. ti.id .. ")") or ", игрок не найден"))) or "недоступна"))
-        fmsg("Уведомление о репорте: " .. (not cfg.reptoast and "выключено в настройках" or (g and g.off) and ("сломалось: " .. tostring(g.err)) or "включено") ..
-            ". Репортов получено: " .. #reports)
+        fmsg("ГЊГҐГІГЄГ  Г­Г Г¤ ГЁГЈГ°Г®ГЄГ®Г¬: " .. (ti and ((ti.off and ("Г®ГёГЁГЎГЄГ : " .. tostring(ti.err))) or ("Г±ГЇГ®Г±Г®ГЎ " .. (ti.mode == 0 and "imgui" or "render") .. (ti.id and (", ГЁГЈГ°Г®ГЄ Г­Г Г©Г¤ГҐГ­ (ID " .. ti.id .. ")") or ", ГЁГЈГ°Г®ГЄ Г­ГҐ Г­Г Г©Г¤ГҐГ­"))) or "Г­ГҐГ¤Г®Г±ГІГіГЇГ­Г "))
+        fmsg("Г“ГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГҐ Г® Г°ГҐГЇГ®Г°ГІГҐ: " .. (not cfg.reptoast and "ГўГ»ГЄГ«ГѕГ·ГҐГ­Г® Гў Г­Г Г±ГІГ°Г®Г©ГЄГ Гµ" or (g and g.off) and ("Г±Г«Г®Г¬Г Г«Г®Г±Гј: " .. tostring(g.err)) or "ГўГЄГ«ГѕГ·ГҐГ­Г®") ..
+            ". ГђГҐГЇГ®Г°ГІГ®Гў ГЇГ®Г«ГіГ·ГҐГ­Г®: " .. #reports)
     end)
     reg("reptest", function(p)
         local text = trim(p or "")
-        if text == "" then text = "Тестовый репорт: проверка уведомления" end
+        if text == "" then text = "Г’ГҐГ±ГІГ®ГўГ»Г© Г°ГҐГЇГ®Г°ГІ: ГЇГ°Г®ГўГҐГ°ГЄГ  ГіГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГї" end
         local shown = false
         pcall(function() if guiState and guiState.ready() then shown = guiState.reportToast({ name = "Test_Player", id = "7", text = text }) end end)
-        fmsg(shown and "Тестовое уведомление запущено." or "Уведомление не показано. Подробности: /fhdiag")
+        fmsg(shown and "Г’ГҐГ±ГІГ®ГўГ®ГҐ ГіГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГҐ Г§Г ГЇГіГ№ГҐГ­Г®." or "Г“ГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГҐ Г­ГҐ ГЇГ®ГЄГ Г§Г Г­Г®. ГЏГ®Г¤Г°Г®ГЎГ­Г®Г±ГІГЁ: /fhdiag")
     end)
     reg("chkres", function() INFO.chkres() end)
     reg("chkend", function() INFO.chkend() end)
@@ -1943,8 +1943,8 @@ local function registerExtra(reg)
         if vrThread then
             pcall(function() vrThread:terminate() end)
             vrThread = nil
-            fmsg("Таймер респавна остановлен.")
-        else fmsg("Таймер не запущен.") end
+            fmsg("Г’Г Г©Г¬ГҐГ° Г°ГҐГ±ГЇГ ГўГ­Г  Г®Г±ГІГ Г­Г®ГўГ«ГҐГ­.")
+        else fmsg("Г’Г Г©Г¬ГҐГ° Г­ГҐ Г§Г ГЇГіГ№ГҐГ­.") end
     end)
 
     reg("tpl", function(p)
@@ -1953,10 +1953,10 @@ local function registerExtra(reg)
             local _, msg = tplAdd(rest) fmsg(msg)
         elseif sub == "del" then
             local n = tonumber(rest)
-            if n and templates[n] then table.remove(templates, n) saveTemplates() fmsg("Шаблон удалён.")
-            else fmsg("Использование: /tpl del N") end
+            if n and templates[n] then table.remove(templates, n) saveTemplates() fmsg("ГГ ГЎГ«Г®Г­ ГіГ¤Г Г«ВёГ­.")
+            else fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /tpl del N") end
         else
-            fmsg("Шаблоны ответов (отправить: /rt [ID] N; добавить: /tpl add текст; удалить: /tpl del N):")
+            fmsg("ГГ ГЎГ«Г®Г­Г» Г®ГІГўГҐГІГ®Гў (Г®ГІГЇГ°Г ГўГЁГІГј: /rt [ID] N; Г¤Г®ГЎГ ГўГЁГІГј: /tpl add ГІГҐГЄГ±ГІ; ГіГ¤Г Г«ГЁГІГј: /tpl del N):")
             for i, t in ipairs(templates) do sampAddChatMessage(string.format("{FFFF00}%d. {FFFFFF}%s", i, t), -1) end
         end
     end)
@@ -1964,7 +1964,7 @@ local function registerExtra(reg)
         local id, n = p:match("^(%d+)%s+(%d+)$")
         if not id then n = p:match("^(%d+)$") id = watchedId end
         n = tonumber(n)
-        if not id or not n or not templates[n] then fmsg("Использование: /rt [ID] номер_шаблона (список: /tpl)") return end
+        if not id or not n or not templates[n] then fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /rt [ID] Г­Г®Г¬ГҐГ°_ГёГ ГЎГ«Г®Г­Г  (Г±ГЇГЁГ±Г®ГЄ: /tpl)") return end
         replyTo(id, templates[n])
     end)
     reg("mpa", function() armAutoMp(true) end)
@@ -1972,83 +1972,83 @@ local function registerExtra(reg)
         local k, v = p:match("^(%S+)%s+(%S+)$")
         if k == "automp" and (v == "on" or v == "off") then
             cfg.automp = (v == "on") saveCfg()
-            fmsg("Авто-/mp после анонса МП: " .. (cfg.automp and "включено" or "выключено"))
-        else fmsg("Использование: /fhset automp on|off (сейчас: " .. (cfg.automp and "on" or "off") .. ")") end
+            fmsg("ГЂГўГІГ®-/mp ГЇГ®Г±Г«ГҐ Г Г­Г®Г­Г±Г  ГЊГЏ: " .. (cfg.automp and "ГўГЄГ«ГѕГ·ГҐГ­Г®" or "ГўГ»ГЄГ«ГѕГ·ГҐГ­Г®"))
+        else fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /fhset automp on|off (Г±ГҐГ©Г·Г Г±: " .. (cfg.automp and "on" or "off") .. ")") end
     end)
     loadNotes()
 end
 
 ----------------------------------------------------------------------
--- ГЛАВНОЕ МЕНЮ /fh
+-- ГѓГ‹ГЂГ‚ГЌГЋГ… ГЊГ…ГЌГћ /fh
 ----------------------------------------------------------------------
 local D_CMDS, D_CMDPAGE = 4130, 4131
 local CMD_PAGES = {
-    { "Раздачи",
-      "{66CCFF}/gw слово | приз {FFFFFF}- запустить раздачу\n" ..
-      "{66CCFF}/gwlast слово | приз {FFFFFF}- финальный раунд, сам закроет раздачу\n" ..
-      "{66CCFF}/gwstop {FFFFFF}- отменить раздачу\n\n" ..
-      "{A9A9A9}Приз: тип и число. Примеры: {FFFF00}банк 500000{A9A9A9}, {FFFF00}лвл 3{A9A9A9}, {FFFF00}#9 15{A9A9A9} (номер статы).\n" ..
-      "Типы: банк, лвл, мат, опыт, закон, сим, бокс, кунг, кик." },
-    { "Репорты",
-      "{66CCFF}/reports {FFFFFF}- последние 15 репортов, выбрали - ответили\n" ..
-      "{66CCFF}/rr [ID] текст {FFFFFF}- ответ игроку через /pm\n\n" ..
-      "{A9A9A9}Если ID не указан, берётся игрок из последней команды /re." },
-    { "Биндер",
-      "{66CCFF}/fbind {FFFFFF}- окно биндера\n" ..
-      "{66CCFF}/bnd add имя текст {FFFFFF}- создать бинд / добавить строку (несколько через ;;)\n" ..
-      "{66CCFF}/bnd rm имя N {FFFFFF}- удалить строку\n" ..
-      "{66CCFF}/bnd del имя {FFFFFF}- удалить бинд\n" ..
-      "{66CCFF}/bnd delay имя мс {FFFFFF}- пауза между строками\n" ..
-      "{66CCFF}/bnd show имя, /bnd list {FFFFFF}- просмотр\n\n" ..
-      "{A9A9A9}В тексте: {FFFF00}{id}{A9A9A9} - ID игрока, {FFFF00}{arg}{A9A9A9} - текст после команды.\n" ..
-      "Строка с / уходит как команда, остальное - в обычный чат." },
-    { "Мероприятия",
-      "{66CCFF}/ev {FFFFFF}- список МП, выбрали - объявление ушло в /aad\n" ..
-      "{66CCFF}/ev ключ {FFFFFF}- сразу объявить (например /ev svet). Для «infern»: /ev infern ID. Приз: /ev svet 5кк или /ev infern ID 5кк\n\n" ..
-      "{A9A9A9}Ключи: svet poliv derbi pryat parkur rulet kovsh myaso dogon car parash digl sultan paint krug infern" },
-    { "Фракции",
-      "{66CCFF}/fr {FFFFFF}- окно фракций: набор, отбор, временная лидерка\n" ..
-      "{66CCFF}/nab ключ {FFFFFF}- набор в /o\n" ..
-      "{66CCFF}/otb ключ {FFFFFF}- отбор на лидера в /aad (потом откроется ввод /mp)\n" ..
-      "{66CCFF}/otbo ключ {FFFFFF}- отбор на лидера в /o\n" ..
-      "{66CCFF}/tlead ключ {FFFFFF}- взять временную лидерку (/templeader)\n\n" ..
-      "{A9A9A9}Ключи: rus jap ita fun out rif bal azt gro vag arm hos mer rad swt gov lsp fbi rcp sud" },
-    { "Наказания",
-      "{FFFFFF}Вставляют команду с ID в строку ввода: {66CCFF}/jj /mut /ww {A9A9A9}(jail, mute, warn)\n" ..
-      "{FFFFFF}С параметрами: {66CCFF}/bb /uw /uj /unm /ub /ib /ip /bip /ofl /mkl /gzc /bp\n" ..
-      "{FFFFFF}По ID или из /re: {66CCFF}/gs /inv {A9A9A9}(getstats, checkinv)\n" ..
-      "{FFFFFF}Без параметров: {66CCFF}/fuel /gh /wh\n\n" ..
-      "{A9A9A9}Расшифровка: bb-ban, uw-unwarn, uj-unjail, unm-unmute, ub-unban, ib-iban, ip-pgetip,\nbip-banip, ofl-offleader, mkl-makeleader, gzc-gzcolor, bp-setbizprod, wh-warehouse." },
-    { "Прочее",
-      "{66CCFF}/ar ID {FFFFFF}- ответ на репорт: /pm игроку + текст жалобы в /a\n" ..
-      "{66CCFF}/poll должность ник {FFFFFF}- опрос игроков об оценке работы админа\n" ..
-      "{66CCFF}/vr {FFFFFF}- через 15 сек удалить и вернуть весь транспорт, {66CCFF}/vrstop {FFFFFF}- отмена\n" ..
-      "{66CCFF}/notes {FFFFFF}- шпаргалки; {66CCFF}/note add название | текст{FFFFFF}, {66CCFF}/note del название" },
-    { "Общее",
-      "{66CCFF}/fh {FFFFFF}- главное меню\n" ..
-      "{66CCFF}/fcmd {FFFFFF}- это окно со списком команд\n" ..
-      "{66CCFF}/binder {FFFFFF}- справка по биндеру\n\n" ..
-      "{A9A9A9}Свои сокращения создавайте в биндере, например:\n{FFFF00}/bnd add jl /jail {id} {arg}" },
+    { "ГђГ Г§Г¤Г Г·ГЁ",
+      "{66CCFF}/gw Г±Г«Г®ГўГ® | ГЇГ°ГЁГ§ {FFFFFF}- Г§Г ГЇГіГ±ГІГЁГІГј Г°Г Г§Г¤Г Г·Гі\n" ..
+      "{66CCFF}/gwlast Г±Г«Г®ГўГ® | ГЇГ°ГЁГ§ {FFFFFF}- ГґГЁГ­Г Г«ГјГ­Г»Г© Г°Г ГіГ­Г¤, Г±Г Г¬ Г§Г ГЄГ°Г®ГҐГІ Г°Г Г§Г¤Г Г·Гі\n" ..
+      "{66CCFF}/gwstop {FFFFFF}- Г®ГІГ¬ГҐГ­ГЁГІГј Г°Г Г§Г¤Г Г·Гі\n\n" ..
+      "{A9A9A9}ГЏГ°ГЁГ§: ГІГЁГЇ ГЁ Г·ГЁГ±Г«Г®. ГЏГ°ГЁГ¬ГҐГ°Г»: {FFFF00}ГЎГ Г­ГЄ 500000{A9A9A9}, {FFFF00}Г«ГўГ« 3{A9A9A9}, {FFFF00}#9 15{A9A9A9} (Г­Г®Г¬ГҐГ° Г±ГІГ ГІГ»).\n" ..
+      "Г’ГЁГЇГ»: ГЎГ Г­ГЄ, Г«ГўГ«, Г¬Г ГІ, Г®ГЇГ»ГІ, Г§Г ГЄГ®Г­, Г±ГЁГ¬, ГЎГ®ГЄГ±, ГЄГіГ­ГЈ, ГЄГЁГЄ." },
+    { "ГђГҐГЇГ®Г°ГІГ»",
+      "{66CCFF}/reports {FFFFFF}- ГЇГ®Г±Г«ГҐГ¤Г­ГЁГҐ 15 Г°ГҐГЇГ®Г°ГІГ®Гў, ГўГ»ГЎГ°Г Г«ГЁ - Г®ГІГўГҐГІГЁГ«ГЁ\n" ..
+      "{66CCFF}/rr [ID] ГІГҐГЄГ±ГІ {FFFFFF}- Г®ГІГўГҐГІ ГЁГЈГ°Г®ГЄГі Г·ГҐГ°ГҐГ§ /pm\n\n" ..
+      "{A9A9A9}Г…Г±Г«ГЁ ID Г­ГҐ ГіГЄГ Г§Г Г­, ГЎГҐГ°ВёГІГ±Гї ГЁГЈГ°Г®ГЄ ГЁГ§ ГЇГ®Г±Г«ГҐГ¤Г­ГҐГ© ГЄГ®Г¬Г Г­Г¤Г» /re." },
+    { "ГЃГЁГ­Г¤ГҐГ°",
+      "{66CCFF}/fbind {FFFFFF}- Г®ГЄГ­Г® ГЎГЁГ­Г¤ГҐГ°Г \n" ..
+      "{66CCFF}/bnd add ГЁГ¬Гї ГІГҐГЄГ±ГІ {FFFFFF}- Г±Г®Г§Г¤Г ГІГј ГЎГЁГ­Г¤ / Г¤Г®ГЎГ ГўГЁГІГј Г±ГІГ°Г®ГЄГі (Г­ГҐГ±ГЄГ®Г«ГјГЄГ® Г·ГҐГ°ГҐГ§ ;;)\n" ..
+      "{66CCFF}/bnd rm ГЁГ¬Гї N {FFFFFF}- ГіГ¤Г Г«ГЁГІГј Г±ГІГ°Г®ГЄГі\n" ..
+      "{66CCFF}/bnd del ГЁГ¬Гї {FFFFFF}- ГіГ¤Г Г«ГЁГІГј ГЎГЁГ­Г¤\n" ..
+      "{66CCFF}/bnd delay ГЁГ¬Гї Г¬Г± {FFFFFF}- ГЇГ ГіГ§Г  Г¬ГҐГ¦Г¤Гі Г±ГІГ°Г®ГЄГ Г¬ГЁ\n" ..
+      "{66CCFF}/bnd show ГЁГ¬Гї, /bnd list {FFFFFF}- ГЇГ°Г®Г±Г¬Г®ГІГ°\n\n" ..
+      "{A9A9A9}Г‚ ГІГҐГЄГ±ГІГҐ: {FFFF00}{id}{A9A9A9} - ID ГЁГЈГ°Г®ГЄГ , {FFFF00}{arg}{A9A9A9} - ГІГҐГЄГ±ГІ ГЇГ®Г±Г«ГҐ ГЄГ®Г¬Г Г­Г¤Г».\n" ..
+      "Г‘ГІГ°Г®ГЄГ  Г± / ГіГµГ®Г¤ГЁГІ ГЄГ ГЄ ГЄГ®Г¬Г Г­Г¤Г , Г®Г±ГІГ Г«ГјГ­Г®ГҐ - Гў Г®ГЎГ»Г·Г­Г»Г© Г·Г ГІ." },
+    { "ГЊГҐГ°Г®ГЇГ°ГЁГїГІГЁГї",
+      "{66CCFF}/ev {FFFFFF}- Г±ГЇГЁГ±Г®ГЄ ГЊГЏ, ГўГ»ГЎГ°Г Г«ГЁ - Г®ГЎГєГїГўГ«ГҐГ­ГЁГҐ ГіГёГ«Г® Гў /aad\n" ..
+      "{66CCFF}/ev ГЄГ«ГѕГ· {FFFFFF}- Г±Г°Г Г§Гі Г®ГЎГєГїГўГЁГІГј (Г­Г ГЇГ°ГЁГ¬ГҐГ° /ev svet). Г„Г«Гї В«infernВ»: /ev infern ID. ГЏГ°ГЁГ§: /ev svet 5ГЄГЄ ГЁГ«ГЁ /ev infern ID 5ГЄГЄ\n\n" ..
+      "{A9A9A9}ГЉГ«ГѕГ·ГЁ: svet poliv derbi pryat parkur rulet kovsh myaso dogon car parash digl sultan paint krug infern" },
+    { "Г”Г°Г ГЄГ¶ГЁГЁ",
+      "{66CCFF}/fr {FFFFFF}- Г®ГЄГ­Г® ГґГ°Г ГЄГ¶ГЁГ©: Г­Г ГЎГ®Г°, Г®ГІГЎГ®Г°, ГўГ°ГҐГ¬ГҐГ­Г­Г Гї Г«ГЁГ¤ГҐГ°ГЄГ \n" ..
+      "{66CCFF}/nab ГЄГ«ГѕГ· {FFFFFF}- Г­Г ГЎГ®Г° Гў /o\n" ..
+      "{66CCFF}/otb ГЄГ«ГѕГ· {FFFFFF}- Г®ГІГЎГ®Г° Г­Г  Г«ГЁГ¤ГҐГ°Г  Гў /aad (ГЇГ®ГІГ®Г¬ Г®ГІГЄГ°Г®ГҐГІГ±Гї ГўГўГ®Г¤ /mp)\n" ..
+      "{66CCFF}/otbo ГЄГ«ГѕГ· {FFFFFF}- Г®ГІГЎГ®Г° Г­Г  Г«ГЁГ¤ГҐГ°Г  Гў /o\n" ..
+      "{66CCFF}/tlead ГЄГ«ГѕГ· {FFFFFF}- ГўГ§ГїГІГј ГўГ°ГҐГ¬ГҐГ­Г­ГіГѕ Г«ГЁГ¤ГҐГ°ГЄГі (/templeader)\n\n" ..
+      "{A9A9A9}ГЉГ«ГѕГ·ГЁ: rus jap ita fun out rif bal azt gro vag arm hos mer rad swt gov lsp fbi rcp sud" },
+    { "ГЌГ ГЄГ Г§Г Г­ГЁГї",
+      "{FFFFFF}Г‚Г±ГІГ ГўГ«ГїГѕГІ ГЄГ®Г¬Г Г­Г¤Гі Г± ID Гў Г±ГІГ°Г®ГЄГі ГўГўГ®Г¤Г : {66CCFF}/jj /mut /ww {A9A9A9}(jail, mute, warn)\n" ..
+      "{FFFFFF}Г‘ ГЇГ Г°Г Г¬ГҐГІГ°Г Г¬ГЁ: {66CCFF}/bb /uw /uj /unm /ub /ib /ip /bip /ofl /mkl /gzc /bp\n" ..
+      "{FFFFFF}ГЏГ® ID ГЁГ«ГЁ ГЁГ§ /re: {66CCFF}/gs /inv {A9A9A9}(getstats, checkinv)\n" ..
+      "{FFFFFF}ГЃГҐГ§ ГЇГ Г°Г Г¬ГҐГІГ°Г®Гў: {66CCFF}/fuel /gh /wh\n\n" ..
+      "{A9A9A9}ГђГ Г±ГёГЁГґГ°Г®ГўГЄГ : bb-ban, uw-unwarn, uj-unjail, unm-unmute, ub-unban, ib-iban, ip-pgetip,\nbip-banip, ofl-offleader, mkl-makeleader, gzc-gzcolor, bp-setbizprod, wh-warehouse." },
+    { "ГЏГ°Г®Г·ГҐГҐ",
+      "{66CCFF}/ar ID {FFFFFF}- Г®ГІГўГҐГІ Г­Г  Г°ГҐГЇГ®Г°ГІ: /pm ГЁГЈГ°Г®ГЄГі + ГІГҐГЄГ±ГІ Г¦Г Г«Г®ГЎГ» Гў /a\n" ..
+      "{66CCFF}/poll Г¤Г®Г«Г¦Г­Г®Г±ГІГј Г­ГЁГЄ {FFFFFF}- Г®ГЇГ°Г®Г± ГЁГЈГ°Г®ГЄГ®Гў Г®ГЎ Г®Г¶ГҐГ­ГЄГҐ Г°Г ГЎГ®ГІГ» Г Г¤Г¬ГЁГ­Г \n" ..
+      "{66CCFF}/vr {FFFFFF}- Г·ГҐГ°ГҐГ§ 15 Г±ГҐГЄ ГіГ¤Г Г«ГЁГІГј ГЁ ГўГҐГ°Г­ГіГІГј ГўГҐГ±Гј ГІГ°Г Г­Г±ГЇГ®Г°ГІ, {66CCFF}/vrstop {FFFFFF}- Г®ГІГ¬ГҐГ­Г \n" ..
+      "{66CCFF}/notes {FFFFFF}- ГёГЇГ Г°ГЈГ Г«ГЄГЁ; {66CCFF}/note add Г­Г Г§ГўГ Г­ГЁГҐ | ГІГҐГЄГ±ГІ{FFFFFF}, {66CCFF}/note del Г­Г Г§ГўГ Г­ГЁГҐ" },
+    { "ГЋГЎГ№ГҐГҐ",
+      "{66CCFF}/fh {FFFFFF}- ГЈГ«Г ГўГ­Г®ГҐ Г¬ГҐГ­Гѕ\n" ..
+      "{66CCFF}/fcmd {FFFFFF}- ГЅГІГ® Г®ГЄГ­Г® Г±Г® Г±ГЇГЁГ±ГЄГ®Г¬ ГЄГ®Г¬Г Г­Г¤\n" ..
+      "{66CCFF}/binder {FFFFFF}- Г±ГЇГ°Г ГўГЄГ  ГЇГ® ГЎГЁГ­Г¤ГҐГ°Гі\n\n" ..
+      "{A9A9A9}Г‘ГўГ®ГЁ Г±Г®ГЄГ°Г Г№ГҐГ­ГЁГї Г±Г®Г§Г¤Г ГўГ Г©ГІГҐ Гў ГЎГЁГ­Г¤ГҐГ°ГҐ, Г­Г ГЇГ°ГЁГ¬ГҐГ°:\n{FFFF00}/bnd add jl /jail {id} {arg}" },
 }
 
 local function uiCommands()
     local t = {}
     for i, p in ipairs(CMD_PAGES) do t[i] = "{FFFFFF}" .. p[1] end
-    uiShow(D_CMDS, "FH | Команды", table.concat(t, "\n"), "Открыть", "Закрыть", 2)
+    uiShow(D_CMDS, "FH | ГЉГ®Г¬Г Г­Г¤Г»", table.concat(t, "\n"), "ГЋГІГЄГ°Г»ГІГј", "Г‡Г ГЄГ°Г»ГІГј", 2)
 end
 
 uiHandlers[D_CMDS] = function(button, list)
     if button == 0 then return end
     local p = CMD_PAGES[list + 1]
     if not p then return uiCommands() end
-    uiShow(D_CMDPAGE, "FH | " .. p[1], p[2], "Назад", "Закрыть", 0)
+    uiShow(D_CMDPAGE, "FH | " .. p[1], p[2], "ГЌГ Г§Г Г¤", "Г‡Г ГЄГ°Г»ГІГј", 0)
 end
 
 uiHandlers[D_CMDPAGE] = function(button)
     if button == 1 then uiCommands() end
 end
 
--- Окно /fh: таблица всех команд
+-- ГЋГЄГ­Г® /fh: ГІГ ГЎГ«ГЁГ¶Г  ГўГ±ГҐГµ ГЄГ®Г¬Г Г­Г¤
 local function carsDo(kind)
     if kind == "spawn" then safeSend("/spawncars")
     elseif kind == "dv" then dvTimer(false)
@@ -2060,64 +2060,64 @@ end
 local function infoDo(kind, arg) local f = INFO[kind] if f then f(arg) end end
 
 local MENU_ROWS = {
-    { "#", "Раздачи" },
-    { "/gw слово | приз", "запустить раздачу (банк 500000, лвл 3, #9 15)" },
-    { "/gwlast слово | приз", "финальный раунд, сам закроет раздачу" },
-    { "/gwstop", "отменить раздачу" },
-    { "#", "Репорты" },
-    { "/reports", "последние 15 репортов, быстрый ответ" },
-    { "/rpl", "обновить список репортов из /define" },
-    { "/tagmode", "переключить способ рисования метки над игроком (если не видна)" },
-    { "/rr [ID] текст", "ответить игроку через /pm" },
-    { "/reptest  /fhdiag", "проверка овального уведомления о репорте; диагностика кодировки и окна" },
-    { "/fhupd [install]", "проверка обновлений на GitHub; install - скачать и установить" },
-    { "/ai [ID]  /aiset  /aidiag", "ИИ-подсказка ответа на репорт; настройка API (/aiset url|key|model|prompt); /aidiag - что доступно для запросов" },
-    { "/ar ID", "ответ + текст жалобы в /a" },
-    { "/tpl  /rt [ID] N", "шаблоны ответов: список, отправка" },
-    { "#", "Мероприятия и опросы" },
-    { "/ev [ключ] [ID] [приз]", "анонс МП в /aad с призом (список: /ev)" },
-    { "/poll должность ник", "опрос об оценке работы админа" },
-    { "#", "Фракции" },
-    { "/fr", "окно: набор, отбор, лидерка" },
-    { "/nab /otb /otbo /tlead ключ", "набор /o, отбор /aad, отбор /o, лидерка" },
-    { "#", "Объявления и памятки" },
-    { "/a1  /chk [ио зо gsg t=60 w=слово]", "проверка активности по должностям, таймер и слово ответа" },
-    { "/chkres  /chkend", "кто отметился; закончить и объявить итог в /a" },
-    { "/pravila", "нормы онлайна и час пик лидерам в чат" },
-    { "/inf  /timeinfo", "инфо для игроков и акция за онлайн в /aad" },
-    { "/razdintro [приз]", "вступление перед раздачей в /aad" },
-    { "/captlist  /bizwarlist", "памятки по правилам каптов и бизваров" },
-    { "/vopros 1-7", "вопрос лидеру в чат, ответ покажет вам" },
-    { "#", "Наказания" },
-    { "/jj /mut /ww [ID]", "jail, mute, warn - вставят команду в ввод" },
+    { "#", "ГђГ Г§Г¤Г Г·ГЁ" },
+    { "/gw Г±Г«Г®ГўГ® | ГЇГ°ГЁГ§", "Г§Г ГЇГіГ±ГІГЁГІГј Г°Г Г§Г¤Г Г·Гі (ГЎГ Г­ГЄ 500000, Г«ГўГ« 3, #9 15)" },
+    { "/gwlast Г±Г«Г®ГўГ® | ГЇГ°ГЁГ§", "ГґГЁГ­Г Г«ГјГ­Г»Г© Г°Г ГіГ­Г¤, Г±Г Г¬ Г§Г ГЄГ°Г®ГҐГІ Г°Г Г§Г¤Г Г·Гі" },
+    { "/gwstop", "Г®ГІГ¬ГҐГ­ГЁГІГј Г°Г Г§Г¤Г Г·Гі" },
+    { "#", "ГђГҐГЇГ®Г°ГІГ»" },
+    { "/reports", "ГЇГ®Г±Г«ГҐГ¤Г­ГЁГҐ 15 Г°ГҐГЇГ®Г°ГІГ®Гў, ГЎГ»Г±ГІГ°Г»Г© Г®ГІГўГҐГІ" },
+    { "/rpl", "Г®ГЎГ­Г®ГўГЁГІГј Г±ГЇГЁГ±Г®ГЄ Г°ГҐГЇГ®Г°ГІГ®Гў ГЁГ§ /define" },
+    { "/tagmode", "ГЇГҐГ°ГҐГЄГ«ГѕГ·ГЁГІГј Г±ГЇГ®Г±Г®ГЎ Г°ГЁГ±Г®ГўГ Г­ГЁГї Г¬ГҐГІГЄГЁ Г­Г Г¤ ГЁГЈГ°Г®ГЄГ®Г¬ (ГҐГ±Г«ГЁ Г­ГҐ ГўГЁГ¤Г­Г )" },
+    { "/rr [ID] ГІГҐГЄГ±ГІ", "Г®ГІГўГҐГІГЁГІГј ГЁГЈГ°Г®ГЄГі Г·ГҐГ°ГҐГ§ /pm" },
+    { "/reptest  /fhdiag", "ГЇГ°Г®ГўГҐГ°ГЄГ  Г®ГўГ Г«ГјГ­Г®ГЈГ® ГіГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГї Г® Г°ГҐГЇГ®Г°ГІГҐ; Г¤ГЁГ ГЈГ­Г®Г±ГІГЁГЄГ  ГЄГ®Г¤ГЁГ°Г®ГўГЄГЁ ГЁ Г®ГЄГ­Г " },
+    { "/fhupd [install]", "ГЇГ°Г®ГўГҐГ°ГЄГ  Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГ© Г­Г  GitHub; install - Г±ГЄГ Г·Г ГІГј ГЁ ГіГ±ГІГ Г­Г®ГўГЁГІГј" },
+    { "/ai [ID]  /aiset  /aidiag", "Г€Г€-ГЇГ®Г¤Г±ГЄГ Г§ГЄГ  Г®ГІГўГҐГІГ  Г­Г  Г°ГҐГЇГ®Г°ГІ; Г­Г Г±ГІГ°Г®Г©ГЄГ  API (/aiset url|key|model|prompt); /aidiag - Г·ГІГ® Г¤Г®Г±ГІГіГЇГ­Г® Г¤Г«Гї Г§Г ГЇГ°Г®Г±Г®Гў" },
+    { "/ar ID", "Г®ГІГўГҐГІ + ГІГҐГЄГ±ГІ Г¦Г Г«Г®ГЎГ» Гў /a" },
+    { "/tpl  /rt [ID] N", "ГёГ ГЎГ«Г®Г­Г» Г®ГІГўГҐГІГ®Гў: Г±ГЇГЁГ±Г®ГЄ, Г®ГІГЇГ°Г ГўГЄГ " },
+    { "#", "ГЊГҐГ°Г®ГЇГ°ГЁГїГІГЁГї ГЁ Г®ГЇГ°Г®Г±Г»" },
+    { "/ev [ГЄГ«ГѕГ·] [ID] [ГЇГ°ГЁГ§]", "Г Г­Г®Г­Г± ГЊГЏ Гў /aad Г± ГЇГ°ГЁГ§Г®Г¬ (Г±ГЇГЁГ±Г®ГЄ: /ev)" },
+    { "/poll Г¤Г®Г«Г¦Г­Г®Г±ГІГј Г­ГЁГЄ", "Г®ГЇГ°Г®Г± Г®ГЎ Г®Г¶ГҐГ­ГЄГҐ Г°Г ГЎГ®ГІГ» Г Г¤Г¬ГЁГ­Г " },
+    { "#", "Г”Г°Г ГЄГ¶ГЁГЁ" },
+    { "/fr", "Г®ГЄГ­Г®: Г­Г ГЎГ®Г°, Г®ГІГЎГ®Г°, Г«ГЁГ¤ГҐГ°ГЄГ " },
+    { "/nab /otb /otbo /tlead ГЄГ«ГѕГ·", "Г­Г ГЎГ®Г° /o, Г®ГІГЎГ®Г° /aad, Г®ГІГЎГ®Г° /o, Г«ГЁГ¤ГҐГ°ГЄГ " },
+    { "#", "ГЋГЎГєГїГўГ«ГҐГ­ГЁГї ГЁ ГЇГ Г¬ГїГІГЄГЁ" },
+    { "/a1  /chk [ГЁГ® Г§Г® gsg t=60 w=Г±Г«Г®ГўГ®]", "ГЇГ°Г®ГўГҐГ°ГЄГ  Г ГЄГІГЁГўГ­Г®Г±ГІГЁ ГЇГ® Г¤Г®Г«Г¦Г­Г®Г±ГІГїГ¬, ГІГ Г©Г¬ГҐГ° ГЁ Г±Г«Г®ГўГ® Г®ГІГўГҐГІГ " },
+    { "/chkres  /chkend", "ГЄГІГ® Г®ГІГ¬ГҐГІГЁГ«Г±Гї; Г§Г ГЄГ®Г­Г·ГЁГІГј ГЁ Г®ГЎГєГїГўГЁГІГј ГЁГІГ®ГЈ Гў /a" },
+    { "/pravila", "Г­Г®Г°Г¬Г» Г®Г­Г«Г Г©Г­Г  ГЁ Г·Г Г± ГЇГЁГЄ Г«ГЁГ¤ГҐГ°Г Г¬ Гў Г·Г ГІ" },
+    { "/inf  /timeinfo", "ГЁГ­ГґГ® Г¤Г«Гї ГЁГЈГ°Г®ГЄГ®Гў ГЁ Г ГЄГ¶ГЁГї Г§Г  Г®Г­Г«Г Г©Г­ Гў /aad" },
+    { "/razdintro [ГЇГ°ГЁГ§]", "ГўГ±ГІГіГЇГ«ГҐГ­ГЁГҐ ГЇГҐГ°ГҐГ¤ Г°Г Г§Г¤Г Г·ГҐГ© Гў /aad" },
+    { "/captlist  /bizwarlist", "ГЇГ Г¬ГїГІГЄГЁ ГЇГ® ГЇГ°Г ГўГЁГ«Г Г¬ ГЄГ ГЇГІГ®Гў ГЁ ГЎГЁГ§ГўГ Г°Г®Гў" },
+    { "/vopros 1-7", "ГўГ®ГЇГ°Г®Г± Г«ГЁГ¤ГҐГ°Гі Гў Г·Г ГІ, Г®ГІГўГҐГІ ГЇГ®ГЄГ Г¦ГҐГІ ГўГ Г¬" },
+    { "#", "ГЌГ ГЄГ Г§Г Г­ГЁГї" },
+    { "/jj /mut /ww [ID]", "jail, mute, warn - ГўГ±ГІГ ГўГїГІ ГЄГ®Г¬Г Г­Г¤Гі Гў ГўГўГ®Г¤" },
     { "/bb /uw /uj /unm /ub", "ban, unwarn, unjail, unmute, unban" },
     { "/ib /ip /bip /ofl /mkl", "iban, pgetip, banip, offleader, makeleader" },
-    { "/gs /inv [ID]", "getstats, checkinv (ID или из /re)" },
+    { "/gs /inv [ID]", "getstats, checkinv (ID ГЁГ«ГЁ ГЁГ§ /re)" },
     { "/fuel /fc /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
-    { "/spc /dva /dvs", "spawncars; удаление админ-каров (таймер 15 с в /a); то же + spawncars" },
-    { "/vr  /vrstop", "то же, что /dvs; отмена таймера" },
-    { "#", "Прочее" },
-    { "/z [ключ]", "занять задачу: 3 раза «z ...» в /a (список: /z)" },
-    { "/vr  /vrstop", "респавн транспорта через 15 сек / отмена" },
-    { "/mpa  /fhset automp on|off", "ввести /mp и нажать 1-ю строку / авто-режим" },
-    { "/fbind  /bnd", "свой биндер: окно и команды (справка /binder)" },
-    { "/notes", "шпаргалки (свои заметки)" },
+    { "/spc /dva /dvs", "spawncars; ГіГ¤Г Г«ГҐГ­ГЁГҐ Г Г¤Г¬ГЁГ­-ГЄГ Г°Г®Гў (ГІГ Г©Г¬ГҐГ° 15 Г± Гў /a); ГІГ® Г¦ГҐ + spawncars" },
+    { "/vr  /vrstop", "ГІГ® Г¦ГҐ, Г·ГІГ® /dvs; Г®ГІГ¬ГҐГ­Г  ГІГ Г©Г¬ГҐГ°Г " },
+    { "#", "ГЏГ°Г®Г·ГҐГҐ" },
+    { "/z [ГЄГ«ГѕГ·]", "Г§Г Г­ГїГІГј Г§Г Г¤Г Г·Гі: 3 Г°Г Г§Г  В«z ...В» Гў /a (Г±ГЇГЁГ±Г®ГЄ: /z)" },
+    { "/vr  /vrstop", "Г°ГҐГ±ГЇГ ГўГ­ ГІГ°Г Г­Г±ГЇГ®Г°ГІГ  Г·ГҐГ°ГҐГ§ 15 Г±ГҐГЄ / Г®ГІГ¬ГҐГ­Г " },
+    { "/mpa  /fhset automp on|off", "ГўГўГҐГ±ГІГЁ /mp ГЁ Г­Г Г¦Г ГІГј 1-Гѕ Г±ГІГ°Г®ГЄГі / Г ГўГІГ®-Г°ГҐГ¦ГЁГ¬" },
+    { "/fbind  /bnd", "Г±ГўГ®Г© ГЎГЁГ­Г¤ГҐГ°: Г®ГЄГ­Г® ГЁ ГЄГ®Г¬Г Г­Г¤Г» (Г±ГЇГ°Г ГўГЄГ  /binder)" },
+    { "/notes", "ГёГЇГ Г°ГЈГ Г«ГЄГЁ (Г±ГўГ®ГЁ Г§Г Г¬ГҐГІГЄГЁ)" },
 }
 
 local function uiMenu()
-    local t = { "{A9A9A9}Команда\t{A9A9A9}Что делает" }
+    local t = { "{A9A9A9}ГЉГ®Г¬Г Г­Г¤Г \t{A9A9A9}Г—ГІГ® Г¤ГҐГ«Г ГҐГІ" }
     for _, r in ipairs(MENU_ROWS) do
         if r[1] == "#" then t[#t + 1] = "{66CCFF}" .. r[2] .. "\t"
         else t[#t + 1] = "{FFFF00}" .. r[1] .. "\t{FFFFFF}" .. r[2] end
     end
-    uiShow(D_MENU, "FH " .. VERSION .. " | Команды", table.concat(t, "\n"), "Закрыть", "", 5)
+    uiShow(D_MENU, "FH " .. VERSION .. " | ГЉГ®Г¬Г Г­Г¤Г»", table.concat(t, "\n"), "Г‡Г ГЄГ°Г»ГІГј", "", 5)
 end
 
 uiHandlers[D_MENU] = function() end
 
 ----------------------------------------------------------------------
--- ОКНО MIMGUI: /fh -- меню слева, страницы справа
--- Если mimgui/шрифт с кириллицей недоступны, /fh откроет обычное диалоговое окно.
+-- ГЋГЉГЌГЋ MIMGUI: /fh -- Г¬ГҐГ­Гѕ Г±Г«ГҐГўГ , Г±ГІГ°Г Г­ГЁГ¶Г» Г±ГЇГ°Г ГўГ 
+-- Г…Г±Г«ГЁ mimgui/ГёГ°ГЁГґГІ Г± ГЄГЁГ°ГЁГ«Г«ГЁГ¶ГҐГ© Г­ГҐГ¤Г®Г±ГІГіГЇГ­Г», /fh Г®ГІГЄГ°Г®ГҐГІ Г®ГЎГ»Г·Г­Г®ГҐ Г¤ГЁГ Г«Г®ГЈГ®ГўГ®ГҐ Г®ГЄГ­Г®.
 ----------------------------------------------------------------------
 local postedActions = {}
 local function post(fn) postedActions[#postedActions + 1] = fn end
@@ -2129,7 +2129,7 @@ local function runPosted()
     end
 end
 
-local guiState   -- заполняется в setupGui; nil, если окно недоступно
+local guiState   -- Г§Г ГЇГ®Г«Г­ГїГҐГІГ±Гї Гў setupGui; nil, ГҐГ±Г«ГЁ Г®ГЄГ­Г® Г­ГҐГ¤Г®Г±ГІГіГЇГ­Г®
 
 local function setupGui()
     if not GUI_ENCODING_OK then return nil end
@@ -2138,7 +2138,7 @@ local function setupGui()
     local okF, ffi = pcall(require, 'ffi')
     if not okF then return nil end
 
-    -- размер экрана и шрифт
+    -- Г°Г Г§Г¬ГҐГ° ГЅГЄГ°Г Г­Г  ГЁ ГёГ°ГЁГґГІ
     local sw, sh = 1280, 720
     pcall(function() sw, sh = getScreenResolution() end)
     local fs = math.max(14, math.min(26, math.floor(sh / 55)))
@@ -2166,7 +2166,7 @@ local function setupGui()
     local RED = imgui.ImVec4(0.95, 0.40, 0.40, 1)
     local V2 = imgui.ImVec2
 
-    -- буферы ввода
+    -- ГЎГіГґГҐГ°Г» ГўГўГ®Г¤Г 
     local function buf(n) return imgui.new.char[n]() end
     local B = {
         gwWord = buf(64), gwPrize = buf(96), reply = buf(512), evId = buf(12),
@@ -2181,7 +2181,7 @@ local function setupGui()
     local liteBuf = imgui.new.bool(cfg.lite)
     local updBuf = imgui.new.bool(cfg.autoupd)
     local repBuf = imgui.new.bool(cfg.reptoast)
-    local applyStyle   -- определяется ниже
+    local applyStyle   -- Г®ГЇГ°ГҐГ¤ГҐГ«ГїГҐГІГ±Гї Г­ГЁГ¦ГҐ
 
     local function getBuf(b) return fromUi(ffi.string(b)) end
     local function cutUtf8(s, n)
@@ -2207,12 +2207,12 @@ local function setupGui()
     local function U(s)
         local c = ucache[s]
         if not c then
-            if ucount > 600 then ucache, ucount = {}, 0 end   -- не даём кэшу расти бесконечно
+            if ucount > 600 then ucache, ucount = {}, 0 end   -- Г­ГҐ Г¤Г ВёГ¬ ГЄГЅГёГі Г°Г Г±ГІГЁ ГЎГҐГ±ГЄГ®Г­ГҐГ·Г­Г®
             c = toUi(s) ucache[s] = c ucount = ucount + 1
         end
         return c
     end
-    -- крупный текст (второй шрифт, если удалось загрузить)
+    -- ГЄГ°ГіГЇГ­Г»Г© ГІГҐГЄГ±ГІ (ГўГІГ®Г°Г®Г© ГёГ°ГЁГґГІ, ГҐГ±Г«ГЁ ГіГ¤Г Г«Г®Г±Гј Г§Г ГЈГ°ГіГ§ГЁГІГј)
     local function bigText(s, color)
         pcall(imgui.SetWindowFontScale, 1.45)
         imgui.TextColored(color or ACC, U(s))
@@ -2223,7 +2223,7 @@ local function setupGui()
         if sub then imgui.TextColored(GRAY, U(sub)) end
         imgui.Separator() imgui.Spacing()
     end
-    -- главная кнопка действия: цвет акцента
+    -- ГЈГ«Г ГўГ­Г Гї ГЄГ­Г®ГЇГЄГ  Г¤ГҐГ©Г±ГІГўГЁГї: Г¶ГўГҐГІ Г ГЄГ¶ГҐГ­ГІГ 
     local function primary(label, size)
         imgui.PushStyleColor(imgui.Col.Button, imgui.ImVec4(cfg.accent[1] * 0.85, cfg.accent[2] * 0.85, cfg.accent[3] * 0.85, 0.85))
         local clicked = imgui.Button(U(label), size)
@@ -2233,13 +2233,13 @@ local function setupGui()
     local function hint(s) imgui.TextColored(GRAY, U(s)) end
 
     ------------------------------------------------------------------
-    -- страницы
+    -- Г±ГІГ°Г Г­ГЁГ¶Г»
     ------------------------------------------------------------------
     local pages = {}
 
-    pages[1] = { "Команды", function()
-        title("Все команды")
-        imgui.Text(U("Поиск")) imgui.SameLine()
+    pages[1] = { "ГЉГ®Г¬Г Г­Г¤Г»", function()
+        title("Г‚Г±ГҐ ГЄГ®Г¬Г Г­Г¤Г»")
+        imgui.Text(U("ГЏГ®ГЁГ±ГЄ")) imgui.SameLine()
         imgui.PushItemWidth(fs * 16) imgui.InputText("##cmdsearch", B.search, 40) imgui.PopItemWidth()
         local q = lower1251(trim(getBuf(B.search)))
         local head
@@ -2254,38 +2254,38 @@ local function setupGui()
         end
     end }
 
-    pages[2] = { "Раздачи", function()
-        title("Раздача призов")
-        imgui.Text(U("Кодовое слово")) imgui.PushItemWidth(-1) imgui.InputText("##gwword", B.gwWord, 64) imgui.PopItemWidth()
-        imgui.Text(U("Приз")) imgui.PushItemWidth(-1) imgui.InputText("##gwprize", B.gwPrize, 96) imgui.PopItemWidth()
-        hint("Формат приза: тип и число. Например: банк 500000, лвл 3, #9 15 (номер статы).")
+    pages[2] = { "ГђГ Г§Г¤Г Г·ГЁ", function()
+        title("ГђГ Г§Г¤Г Г·Г  ГЇГ°ГЁГ§Г®Гў")
+        imgui.Text(U("ГЉГ®Г¤Г®ГўГ®ГҐ Г±Г«Г®ГўГ®")) imgui.PushItemWidth(-1) imgui.InputText("##gwword", B.gwWord, 64) imgui.PopItemWidth()
+        imgui.Text(U("ГЏГ°ГЁГ§")) imgui.PushItemWidth(-1) imgui.InputText("##gwprize", B.gwPrize, 96) imgui.PopItemWidth()
+        hint("Г”Г®Г°Г¬Г ГІ ГЇГ°ГЁГ§Г : ГІГЁГЇ ГЁ Г·ГЁГ±Г«Г®. ГЌГ ГЇГ°ГЁГ¬ГҐГ°: ГЎГ Г­ГЄ 500000, Г«ГўГ« 3, #9 15 (Г­Г®Г¬ГҐГ° Г±ГІГ ГІГ»).")
         imgui.Spacing()
         local function start(isLast)
             local w, p = getBuf(B.gwWord), getBuf(B.gwPrize)
             post(function() gwStart(w .. " | " .. p, isLast) end)
         end
-        if imgui.Button(U("Старт"), V2(fs * 7, fs * 2)) then start(false) end
+        if imgui.Button(U("Г‘ГІГ Г°ГІ"), V2(fs * 7, fs * 2)) then start(false) end
         imgui.SameLine()
-        if imgui.Button(U("Финальный раунд"), V2(fs * 10, fs * 2)) then start(true) end
+        if imgui.Button(U("Г”ГЁГ­Г Г«ГјГ­Г»Г© Г°Г ГіГ­Г¤"), V2(fs * 10, fs * 2)) then start(true) end
         imgui.SameLine()
-        if imgui.Button(U("Стоп"), V2(fs * 6, fs * 2)) then post(function() gw.active = false gw.last = false fmsg("Раздача отменена.") end) end
+        if imgui.Button(U("Г‘ГІГ®ГЇ"), V2(fs * 6, fs * 2)) then post(function() gw.active = false gw.last = false fmsg("ГђГ Г§Г¤Г Г·Г  Г®ГІГ¬ГҐГ­ГҐГ­Г .") end) end
         imgui.Spacing() imgui.Separator() imgui.Spacing()
         if gw.active then
-            imgui.TextColored(GREEN, U("Идёт раздача"))
-            imgui.Text(U("Слово: " .. gw.word))
-            imgui.Text(U("Приз: " .. gw.prize))
-            if not gw.stat then imgui.TextColored(RED, U("Тип приза не распознан - выдавать вручную.")) end
+            imgui.TextColored(GREEN, U("Г€Г¤ВёГІ Г°Г Г§Г¤Г Г·Г "))
+            imgui.Text(U("Г‘Г«Г®ГўГ®: " .. gw.word))
+            imgui.Text(U("ГЏГ°ГЁГ§: " .. gw.prize))
+            if not gw.stat then imgui.TextColored(RED, U("Г’ГЁГЇ ГЇГ°ГЁГ§Г  Г­ГҐ Г°Г Г±ГЇГ®Г§Г­Г Г­ - ГўГ»Г¤Г ГўГ ГІГј ГўГ°ГіГ·Г­ГіГѕ.")) end
         else
-            imgui.TextColored(GRAY, U("Раздача не запущена."))
+            imgui.TextColored(GRAY, U("ГђГ Г§Г¤Г Г·Г  Г­ГҐ Г§Г ГЇГіГ№ГҐГ­Г ."))
         end
     end }
 
-    pages[3] = { "Репорты", function()
-        title("Последние репорты")
-        if imgui.Button(U("Обновить из /define") .. "##rpl", V2(fs * 12, fs * 1.8)) then post(function() DEF.refresh() end) end
-        imgui.SameLine() hint("Список берётся из команды /define (диалог не показывается).")
+    pages[3] = { "ГђГҐГЇГ®Г°ГІГ»", function()
+        title("ГЏГ®Г±Г«ГҐГ¤Г­ГЁГҐ Г°ГҐГЇГ®Г°ГІГ»")
+        if imgui.Button(U("ГЋГЎГ­Г®ГўГЁГІГј ГЁГ§ /define") .. "##rpl", V2(fs * 12, fs * 1.8)) then post(function() DEF.refresh() end) end
+        imgui.SameLine() hint("Г‘ГЇГЁГ±Г®ГЄ ГЎГҐГ°ВёГІГ±Гї ГЁГ§ ГЄГ®Г¬Г Г­Г¤Г» /define (Г¤ГЁГ Г«Г®ГЈ Г­ГҐ ГЇГ®ГЄГ Г§Г»ГўГ ГҐГІГ±Гї).")
         if #reports == 0 then
-            hint("Репортов пока нет.")
+            hint("ГђГҐГЇГ®Г°ГІГ®Гў ГЇГ®ГЄГ  Г­ГҐГІ.")
         else
             imgui.BeginChild("##replist", V2(0, fs * 9), true)
             for i, r in ipairs(reports) do
@@ -2300,30 +2300,30 @@ local function setupGui()
             end
             if r then
                 imgui.Spacing()
-                imgui.PushItemWidth(-1) imgui.InputTextWithHint("##reply", U("Ответ игроку (уйдёт через /pm)"), B.reply, 512) imgui.PopItemWidth()
-                if imgui.Button(U("Ответить"), V2(fs * 8, fs * 2)) then
+                imgui.PushItemWidth(-1) imgui.InputTextWithHint("##reply", U("ГЋГІГўГҐГІ ГЁГЈГ°Г®ГЄГі (ГіГ©Г¤ВёГІ Г·ГҐГ°ГҐГ§ /pm)"), B.reply, 512) imgui.PopItemWidth()
+                if imgui.Button(U("ГЋГІГўГҐГІГЁГІГј"), V2(fs * 8, fs * 2)) then
                     local text, id = getBuf(B.reply), r.id
                     post(function() if replyTo(id, text) then clearBuf(B.reply) end end)
                 end
                 imgui.SameLine()
-                if imgui.Button(U("Принять в /a"), V2(fs * 9, fs * 2)) then
+                if imgui.Button(U("ГЏГ°ГЁГ­ГїГІГј Гў /a"), V2(fs * 9, fs * 2)) then
                     local id = r.id
                     post(function() cmdAr(id) end)
                 end
                 imgui.SameLine()
-                if primary("ИИ ответ##aibtn", V2(fs * 8, fs * 2)) then
+                if primary("Г€Г€ Г®ГІГўГҐГІ##aibtn", V2(fs * 8, fs * 2)) then
                     local rr = r
                     post(function() AI.suggest(rr, function() end) end)
                 end
                 imgui.Spacing()
-                imgui.PushItemWidth(-1) imgui.InputTextWithHint("##rpreason", U("Причина наказания (обязательно)"), B.modTxt, 160) imgui.PopItemWidth()
-                for _, pa in ipairs({ { "Варн", "/warn" }, { "Мут", "/mute" }, { "Джайл", "/jail" }, { "Бан", "/ban" } }) do
+                imgui.PushItemWidth(-1) imgui.InputTextWithHint("##rpreason", U("ГЏГ°ГЁГ·ГЁГ­Г  Г­Г ГЄГ Г§Г Г­ГЁГї (Г®ГЎГїГ§Г ГІГҐГ«ГјГ­Г®)"), B.modTxt, 160) imgui.PopItemWidth()
+                for _, pa in ipairs({ { "Г‚Г Г°Г­", "/warn" }, { "ГЊГіГІ", "/mute" }, { "Г„Г¦Г Г©Г«", "/jail" }, { "ГЃГ Г­", "/ban" } }) do
                     if imgui.Button(U(pa[1]) .. "##rp" .. pa[2], V2(fs * 6, fs * 2)) then
                         local rtx = trim(getBuf(B.modTxt))
-                        if rtx == "" then G.modMsg = "Укажите причину в поле выше."
+                        if rtx == "" then G.modMsg = "Г“ГЄГ Г¦ГЁГІГҐ ГЇГ°ГЁГ·ГЁГ­Гі Гў ГЇГ®Г«ГҐ ГўГ»ГёГҐ."
                         else
                             local line = pa[2] .. " " .. r.id .. " " .. rtx
-                            G.modMsg = "Отправлено: " .. line
+                            G.modMsg = "ГЋГІГЇГ°Г ГўГ«ГҐГ­Г®: " .. line
                             post(function() safeSend(line) end)
                         end
                     end
@@ -2332,9 +2332,9 @@ local function setupGui()
                 imgui.NewLine()
                 if G.modMsg then imgui.TextColored(GRAY, U(G.modMsg)) end
                 if AI.status ~= "" then imgui.TextColored(GRAY, toUi(AI.status)) end
-            else hint("Выберите репорт из списка.") end
+            else hint("Г‚Г»ГЎГҐГ°ГЁГІГҐ Г°ГҐГЇГ®Г°ГІ ГЁГ§ Г±ГЇГЁГ±ГЄГ .") end
         end
-        imgui.Spacing() imgui.Separator() imgui.TextColored(ACC, U("Шаблоны ответов (нажмите - текст попадёт в поле ответа)"))
+        imgui.Spacing() imgui.Separator() imgui.TextColored(ACC, U("ГГ ГЎГ«Г®Г­Г» Г®ГІГўГҐГІГ®Гў (Г­Г Г¦Г¬ГЁГІГҐ - ГІГҐГЄГ±ГІ ГЇГ®ГЇГ Г¤ВёГІ Гў ГЇГ®Г«ГҐ Г®ГІГўГҐГІГ )"))
         for i, t in ipairs(templates) do
             if imgui.SmallButton(U("x") .. "##td" .. i) then
                 local idx = i
@@ -2343,9 +2343,9 @@ local function setupGui()
             imgui.SameLine()
             if imgui.Selectable(toUi(t) .. "##tp" .. i, false) then ffi.copy(B.reply, toUi(t):sub(1, 500)) end
         end
-        imgui.PushItemWidth(-fs * 7) imgui.InputTextWithHint("##tplnew", U("новый шаблон"), B.tpl, 160) imgui.PopItemWidth()
+        imgui.PushItemWidth(-fs * 7) imgui.InputTextWithHint("##tplnew", U("Г­Г®ГўГ»Г© ГёГ ГЎГ«Г®Г­"), B.tpl, 160) imgui.PopItemWidth()
         imgui.SameLine()
-        if imgui.Button(U("Добавить шаблон"), V2(fs * 8, 0)) then
+        if imgui.Button(U("Г„Г®ГЎГ ГўГЁГІГј ГёГ ГЎГ«Г®Г­"), V2(fs * 8, 0)) then
             local text = getBuf(B.tpl)
             post(function()
                 local ok, msg = tplAdd(text)
@@ -2355,11 +2355,11 @@ local function setupGui()
         end
     end }
 
-    pages[4] = { "Мероприятия", function()
-        title("Анонсы МП в /aad")
-        imgui.Text(U("ID ведущего (для «Догони Инфернус»)")) imgui.SameLine()
+    pages[4] = { "ГЊГҐГ°Г®ГЇГ°ГЁГїГІГЁГї", function()
+        title("ГЂГ­Г®Г­Г±Г» ГЊГЏ Гў /aad")
+        imgui.Text(U("ID ГўГҐГ¤ГіГ№ГҐГЈГ® (Г¤Г«Гї В«Г„Г®ГЈГ®Г­ГЁ Г€Г­ГґГҐГ°Г­ГіГ±В»)")) imgui.SameLine()
         imgui.PushItemWidth(fs * 5) imgui.InputText("##evid", B.evId, 12) imgui.PopItemWidth()
-        imgui.Text(U("Приз (необязательно)")) imgui.SameLine()
+        imgui.Text(U("ГЏГ°ГЁГ§ (Г­ГҐГ®ГЎГїГ§Г ГІГҐГ«ГјГ­Г®)")) imgui.SameLine()
         imgui.PushItemWidth(fs * 14) imgui.InputText("##evprize", B.evPrize, 90) imgui.PopItemWidth()
         imgui.Spacing()
         for i, e in ipairs(EVENTS) do
@@ -2371,19 +2371,19 @@ local function setupGui()
         end
     end }
 
-    pages[10] = { "Транспорт", function()
-        title("Транспорт сервера")
+    pages[10] = { "Г’Г°Г Г­Г±ГЇГ®Г°ГІ", function()
+        title("Г’Г°Г Г­Г±ГЇГ®Г°ГІ Г±ГҐГ°ГўГҐГ°Г ")
         local bw = V2(fs * 14, fs * 2)
-        if imgui.Button(U("Заспавнить кары сервера") .. "##cs", bw) then post(function() carsDo("spawn") end) end
+        if imgui.Button(U("Г‡Г Г±ГЇГ ГўГ­ГЁГІГј ГЄГ Г°Г» Г±ГҐГ°ГўГҐГ°Г ") .. "##cs", bw) then post(function() carsDo("spawn") end) end
         imgui.SameLine()
-        if imgui.Button(U("Удалить админ-кары") .. "##cd", bw) then post(function() carsDo("dv") end) end
-        if imgui.Button(U("Удалить + заспавнить") .. "##cds", bw) then post(function() carsDo("dvs") end) end
+        if imgui.Button(U("Г“Г¤Г Г«ГЁГІГј Г Г¤Г¬ГЁГ­-ГЄГ Г°Г»") .. "##cd", bw) then post(function() carsDo("dv") end) end
+        if imgui.Button(U("Г“Г¤Г Г«ГЁГІГј + Г§Г Г±ГЇГ ГўГ­ГЁГІГј") .. "##cds", bw) then post(function() carsDo("dvs") end) end
         imgui.SameLine()
-        if imgui.Button(U("Заправить кары") .. "##cf", bw) then post(function() carsDo("fuel") end) end
+        if imgui.Button(U("Г‡Г ГЇГ°Г ГўГЁГІГј ГЄГ Г°Г»") .. "##cf", bw) then post(function() carsDo("fuel") end) end
         imgui.Spacing()
         imgui.Spacing()
-        hint("Удаление админ-каров: сначала предупреждение в /a, через 15 секунд /dvall.")
-        if imgui.Button(U("Отменить удаление") .. "##cvs", bw) then post(function() pcall(sampProcessChatInput, "/vrstop") end) end
+        hint("Г“Г¤Г Г«ГҐГ­ГЁГҐ Г Г¤Г¬ГЁГ­-ГЄГ Г°Г®Гў: Г±Г­Г Г·Г Г«Г  ГЇГ°ГҐГ¤ГіГЇГ°ГҐГ¦Г¤ГҐГ­ГЁГҐ Гў /a, Г·ГҐГ°ГҐГ§ 15 Г±ГҐГЄГіГ­Г¤ /dvall.")
+        if imgui.Button(U("ГЋГІГ¬ГҐГ­ГЁГІГј ГіГ¤Г Г«ГҐГ­ГЁГҐ") .. "##cvs", bw) then post(function() pcall(sampProcessChatInput, "/vrstop") end) end
     end }
 
     local function selNames()
@@ -2392,8 +2392,8 @@ local function setupGui()
         return names
     end
 
-    pages[12] = { "Главная", function()
-        title("Главная", "Быстрые действия и состояние")
+    pages[12] = { "ГѓГ«Г ГўГ­Г Гї", function()
+        title("ГѓГ«Г ГўГ­Г Гї", "ГЃГ»Г±ГІГ°Г»ГҐ Г¤ГҐГ©Г±ГІГўГЁГї ГЁ Г±Г®Г±ГІГ®ГїГ­ГЁГҐ")
         local active = CHK and CHK.active
         local function tile(id, label, value, color)
             imgui.BeginChild("##tile" .. id, V2(fs * 8.6, fs * 4.2), true)
@@ -2401,15 +2401,15 @@ local function setupGui()
             bigText(value, color)
             imgui.EndChild()
         end
-        tile(1, "Репортов в списке", tostring(#reports), ACC) imgui.SameLine()
-        tile(2, "Авто-/mp", cfg.automp and "вкл" or "выкл", cfg.automp and GREEN or GRAY) imgui.SameLine()
-        tile(3, "Проверка активности", active and ("идёт: " .. #CHK.list) or "нет", active and GREEN or GRAY) imgui.SameLine()
-        tile(4, "ID из /re", tostring(watchedId or "-"), YEL)
+        tile(1, "ГђГҐГЇГ®Г°ГІГ®Гў Гў Г±ГЇГЁГ±ГЄГҐ", tostring(#reports), ACC) imgui.SameLine()
+        tile(2, "ГЂГўГІГ®-/mp", cfg.automp and "ГўГЄГ«" or "ГўГ»ГЄГ«", cfg.automp and GREEN or GRAY) imgui.SameLine()
+        tile(3, "ГЏГ°Г®ГўГҐГ°ГЄГ  Г ГЄГІГЁГўГ­Г®Г±ГІГЁ", active and ("ГЁГ¤ВёГІ: " .. #CHK.list) or "Г­ГҐГІ", active and GREEN or GRAY) imgui.SameLine()
+        tile(4, "ID ГЁГ§ /re", tostring(watchedId or "-"), YEL)
         if UPD.latest and verNewer(UPD.latest, VERSION) then
             imgui.BeginChild("##updbanner", V2(0, fs * 3.2), true)
-            imgui.TextColored(YEL, toUi("Доступно обновление v" .. UPD.latest .. " (у вас v" .. VERSION .. ")"))
+            imgui.TextColored(YEL, toUi("Г„Г®Г±ГІГіГЇГ­Г® Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГҐ v" .. UPD.latest .. " (Гі ГўГ Г± v" .. VERSION .. ")"))
             if UPD.notes ~= "" then imgui.SameLine() imgui.TextColored(GRAY, toUi(UPD.notes)) end
-            if primary("Установить обновление##updinst", V2(fs * 14, fs * 1.6)) then post(UPD.install) end
+            if primary("Г“Г±ГІГ Г­Г®ГўГЁГІГј Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГҐ##updinst", V2(fs * 14, fs * 1.6)) then post(UPD.install) end
             imgui.EndChild()
         end
         imgui.Spacing()
@@ -2420,25 +2420,25 @@ local function setupGui()
             if clicked then post(fn) end
             if same then imgui.SameLine() end
         end
-        imgui.TextColored(ACC, U("ПРОВЕРКИ И РЕПОРТЫ"))
-        btn("Проверка активности", 1, function() INFO.a1(selNames()) end, true, true)
-        btn("Список репортов", 2, function() G.page = 3 end, true)
-        btn("Раздача призов", 3, function() G.page = 2 end, false)
-        imgui.Spacing() imgui.TextColored(ACC, U("ТРАНСПОРТ"))
-        btn("Заправить кары", 4, function() carsDo("fuel") end, true)
-        btn("Заспавнить кары", 5, function() carsDo("spawn") end, true)
-        btn("Удалить адм-кары (15 с)", 6, function() carsDo("dv") end, false)
-        imgui.Spacing() imgui.TextColored(ACC, U("МЕРОПРИЯТИЯ И ОБЪЯВЛЕНИЯ"))
-        btn("Нажать /mp", 7, function() armAutoMp(true) end, true)
-        btn("Правила лидерам", 8, function() INFO.rules() end, true)
-        btn("Инфо игрокам", 9, function() INFO.inf() end, false)
+        imgui.TextColored(ACC, U("ГЏГђГЋГ‚Г…ГђГЉГ€ Г€ ГђГ…ГЏГЋГђГ’Г›"))
+        btn("ГЏГ°Г®ГўГҐГ°ГЄГ  Г ГЄГІГЁГўГ­Г®Г±ГІГЁ", 1, function() INFO.a1(selNames()) end, true, true)
+        btn("Г‘ГЇГЁГ±Г®ГЄ Г°ГҐГЇГ®Г°ГІГ®Гў", 2, function() G.page = 3 end, true)
+        btn("ГђГ Г§Г¤Г Г·Г  ГЇГ°ГЁГ§Г®Гў", 3, function() G.page = 2 end, false)
+        imgui.Spacing() imgui.TextColored(ACC, U("Г’ГђГЂГЌГ‘ГЏГЋГђГ’"))
+        btn("Г‡Г ГЇГ°Г ГўГЁГІГј ГЄГ Г°Г»", 4, function() carsDo("fuel") end, true)
+        btn("Г‡Г Г±ГЇГ ГўГ­ГЁГІГј ГЄГ Г°Г»", 5, function() carsDo("spawn") end, true)
+        btn("Г“Г¤Г Г«ГЁГІГј Г Г¤Г¬-ГЄГ Г°Г» (15 Г±)", 6, function() carsDo("dv") end, false)
+        imgui.Spacing() imgui.TextColored(ACC, U("ГЊГ…ГђГЋГЏГђГ€ГџГ’Г€Гџ Г€ ГЋГЃГљГџГ‚Г‹Г…ГЌГ€Гџ"))
+        btn("ГЌГ Г¦Г ГІГј /mp", 7, function() armAutoMp(true) end, true)
+        btn("ГЏГ°Г ГўГЁГ«Г  Г«ГЁГ¤ГҐГ°Г Г¬", 8, function() INFO.rules() end, true)
+        btn("Г€Г­ГґГ® ГЁГЈГ°Г®ГЄГ Г¬", 9, function() INFO.inf() end, false)
         imgui.Spacing()
-        hint("Остальное - в меню слева. Все команды и поиск по ним: страница «Команды».")
+        hint("ГЋГ±ГІГ Г«ГјГ­Г®ГҐ - Гў Г¬ГҐГ­Гѕ Г±Г«ГҐГўГ . Г‚Г±ГҐ ГЄГ®Г¬Г Г­Г¤Г» ГЁ ГЇГ®ГЁГ±ГЄ ГЇГ® Г­ГЁГ¬: Г±ГІГ°Г Г­ГЁГ¶Г  В«ГЉГ®Г¬Г Г­Г¤Г»В».")
     end }
 
-    pages[13] = { "Проверка", function()
-        title("Проверка активности")
-        hint("Выберите должности или набор. Если никого не выбрать - общая проверка.")
+    pages[13] = { "ГЏГ°Г®ГўГҐГ°ГЄГ ", function()
+        title("ГЏГ°Г®ГўГҐГ°ГЄГ  Г ГЄГІГЁГўГ­Г®Г±ГІГЁ")
+        hint("Г‚Г»ГЎГҐГ°ГЁГІГҐ Г¤Г®Г«Г¦Г­Г®Г±ГІГЁ ГЁГ«ГЁ Г­Г ГЎГ®Г°. Г…Г±Г«ГЁ Г­ГЁГЄГ®ГЈГ® Г­ГҐ ГўГ»ГЎГ°Г ГІГј - Г®ГЎГ№Г Гї ГЇГ°Г®ГўГҐГ°ГЄГ .")
         for i, p in ipairs(CHK_PRESETS) do
             if imgui.Button(U(p[1]) .. "##pre" .. i, V2(fs * 9, fs * 1.8)) then
                 sel.roles = {}
@@ -2448,119 +2448,119 @@ local function setupGui()
             end
             imgui.SameLine()
         end
-        if imgui.Button(U("Сбросить") .. "##prer", V2(fs * 7, fs * 1.8)) then sel.roles = {} end
+        if imgui.Button(U("Г‘ГЎГ°Г®Г±ГЁГІГј") .. "##prer", V2(fs * 7, fs * 1.8)) then sel.roles = {} end
         imgui.Spacing()
         local function roleBtn(i)
             if imgui.Selectable(U(ROLES[i][2]) .. "##crole" .. i, sel.roles[i] == true, 0, V2(fs * 6, fs * 1.4)) then sel.roles[i] = not sel.roles[i] end
         end
-        imgui.TextColored(ACC, U("Руководящие"))
+        imgui.TextColored(ACC, U("ГђГіГЄГ®ГўГ®Г¤ГїГ№ГЁГҐ"))
         for i = 1, 7 do
             roleBtn(i)
             if i ~= 4 and i < 7 then imgui.SameLine() end
         end
-        imgui.Spacing() imgui.TextColored(ACC, U("Следящие (ГС, ЗГС, ПГС по структурам)"))
+        imgui.Spacing() imgui.TextColored(ACC, U("Г‘Г«ГҐГ¤ГїГ№ГЁГҐ (ГѓГ‘, Г‡ГѓГ‘, ГЏГѓГ‘ ГЇГ® Г±ГІГ°ГіГЄГІГіГ°Г Г¬)"))
         for i = 8, #ROLES do
             roleBtn(i)
             if (i - 7) % 3 ~= 0 and i < #ROLES then imgui.SameLine() end
         end
         imgui.Spacing()
-        imgui.Text(U("Ответ")) imgui.SameLine()
+        imgui.Text(U("ГЋГІГўГҐГІ")) imgui.SameLine()
         imgui.PushItemWidth(fs * 6) imgui.InputText("##chkword", B.chkWord, 20) imgui.PopItemWidth()
-        imgui.SameLine() imgui.Text(U("Секунд")) imgui.SameLine()
+        imgui.SameLine() imgui.Text(U("Г‘ГҐГЄГіГ­Г¤")) imgui.SameLine()
         imgui.PushItemWidth(fs * 4) imgui.InputText("##chksecs", B.chkSecs, 6) imgui.PopItemWidth()
-        imgui.SameLine() hint("(0 - без таймера)")
+        imgui.SameLine() hint("(0 - ГЎГҐГ§ ГІГ Г©Г¬ГҐГ°Г )")
         local word = trim(getBuf(B.chkWord))
         local secs = tonumber(getBuf(B.chkSecs)) or 0
         imgui.Spacing()
-        imgui.TextColored(YEL, U("Что уйдёт в /a:"))
+        imgui.TextColored(YEL, U("Г—ГІГ® ГіГ©Г¤ВёГІ Гў /a:"))
         local names = selNames()
         local key = table.concat(names, "|") .. "#" .. word .. "#" .. secs
         if G.chkKey ~= key then G.chkKey, G.chkPreview = key, (chkLines(names, word, secs)) end
         for _, l in ipairs(G.chkPreview) do imgui.TextWrapped(U(l)) end
         imgui.Spacing()
         local bw = V2(fs * 11, fs * 2.2)
-        if primary("Начать проверку##chkgo", bw) then
+        if primary("ГЌГ Г·Г ГІГј ГЇГ°Г®ГўГҐГ°ГЄГі##chkgo", bw) then
             local names = selNames()
             post(function() sayA1(names, { word = word, seconds = secs }) end)
         end
         imgui.SameLine()
-        if imgui.Button(U("Завершить и объявить") .. "##chkfin", bw) then post(function() chkEnd(true) end) end
+        if imgui.Button(U("Г‡Г ГўГҐГ°ГёГЁГІГј ГЁ Г®ГЎГєГїГўГЁГІГј") .. "##chkfin", bw) then post(function() chkEnd(true) end) end
         imgui.SameLine()
-        if imgui.Button(U("Итог окном") .. "##chkres", bw) then post(chkShow) end
+        if imgui.Button(U("Г€ГІГ®ГЈ Г®ГЄГ­Г®Г¬") .. "##chkres", bw) then post(chkShow) end
         imgui.Spacing()
-        if CHK.active then imgui.TextColored(GREEN, U("Идёт проверка. Отметились: " .. #CHK.list))
-        else imgui.TextColored(GRAY, U("Проверка не идёт. Последний результат: " .. #CHK.list)) end
+        if CHK.active then imgui.TextColored(GREEN, U("Г€Г¤ВёГІ ГЇГ°Г®ГўГҐГ°ГЄГ . ГЋГІГ¬ГҐГІГЁГ«ГЁГ±Гј: " .. #CHK.list))
+        else imgui.TextColored(GRAY, U("ГЏГ°Г®ГўГҐГ°ГЄГ  Г­ГҐ ГЁГ¤ВёГІ. ГЏГ®Г±Г«ГҐГ¤Г­ГЁГ© Г°ГҐГ§ГіГ«ГјГІГ ГІ: " .. #CHK.list)) end
         imgui.BeginChild("##chkans", V2(0, fs * 7), true)
-        if #CHK.list == 0 then hint("Пока никто не ответил.") end
+        if #CHK.list == 0 then hint("ГЏГ®ГЄГ  Г­ГЁГЄГІГ® Г­ГҐ Г®ГІГўГҐГІГЁГ«.") end
         for i, e in ipairs(CHK.list) do
             imgui.Text(U(i .. ". " .. e.name .. (e.id and ("[" .. e.id .. "]") or "")))
-            imgui.SameLine(fs * 16) imgui.TextColored(GRAY, U("через " .. e.sec .. " сек."))
+            imgui.SameLine(fs * 16) imgui.TextColored(GRAY, U("Г·ГҐГ°ГҐГ§ " .. e.sec .. " Г±ГҐГЄ."))
         end
         imgui.EndChild()
     end }
 
-    pages[14] = { "ИИ", function()
-        title("ИИ-помощник")
-        hint("Спросите что угодно: правила, формулировки, ответ игроку. Ответ появится ниже.")
+    pages[14] = { "Г€Г€", function()
+        title("Г€Г€-ГЇГ®Г¬Г®Г№Г­ГЁГЄ")
+        hint("Г‘ГЇГ°Г®Г±ГЁГІГҐ Г·ГІГ® ГіГЈГ®Г¤Г­Г®: ГЇГ°Г ГўГЁГ«Г , ГґГ®Г°Г¬ГіГ«ГЁГ°Г®ГўГЄГЁ, Г®ГІГўГҐГІ ГЁГЈГ°Г®ГЄГі. ГЋГІГўГҐГІ ГЇГ®ГїГўГЁГІГ±Гї Г­ГЁГ¦ГҐ.")
         imgui.InputTextMultiline("##aichat", B.aiChat, 600, V2(-1, fs * 4))
         local bw = V2(fs * 11, fs * 2)
-        if primary("Спросить##aiask", bw) then
+        if primary("Г‘ГЇГ°Г®Г±ГЁГІГј##aiask", bw) then
             local q = trim(getBuf(B.aiChat))
-            if q == "" then G.aiMsg = "Напишите вопрос."
-            elseif not AI.ready() then G.aiMsg = "Сначала заполните адрес и ключ API в Настройках."
+            if q == "" then G.aiMsg = "ГЌГ ГЇГЁГёГЁГІГҐ ГўГ®ГЇГ°Г®Г±."
+            elseif not AI.ready() then G.aiMsg = "Г‘Г­Г Г·Г Г«Г  Г§Г ГЇГ®Г«Г­ГЁГІГҐ Г Г¤Г°ГҐГ± ГЁ ГЄГ«ГѕГ· API Гў ГЌГ Г±ГІГ°Г®Г©ГЄГ Гµ."
             else
-                G.aiMsg = "Думаю..."
+                G.aiMsg = "Г„ГіГ¬Г Гѕ..."
                 post(function()
-                    AI.ask("Ты помощник администратора SA-MP сервера. Отвечай кратко, по-русски.", q, function(ok, text)
-                        G.aiMsg = ok and tostring(text) or ("Ошибка: " .. tostring(text))
+                    AI.ask("Г’Г» ГЇГ®Г¬Г®Г№Г­ГЁГЄ Г Г¤Г¬ГЁГ­ГЁГ±ГІГ°Г ГІГ®Г°Г  SA-MP Г±ГҐГ°ГўГҐГ°Г . ГЋГІГўГҐГ·Г Г© ГЄГ°Г ГІГЄГ®, ГЇГ®-Г°ГіГ±Г±ГЄГЁ.", q, function(ok, text)
+                        G.aiMsg = ok and tostring(text) or ("ГЋГёГЁГЎГЄГ : " .. tostring(text))
                     end)
                 end)
             end
         end
         imgui.SameLine()
-        if imgui.Button(U("Очистить") .. "##aiclr", bw) then ffi.copy(B.aiChat, "") G.aiMsg = nil end
+        if imgui.Button(U("ГЋГ·ГЁГ±ГІГЁГІГј") .. "##aiclr", bw) then ffi.copy(B.aiChat, "") G.aiMsg = nil end
         imgui.BeginChild("##aians", V2(0, fs * 8), true)
-        imgui.TextWrapped(U(G.aiMsg or "Ответ появится здесь."))
+        imgui.TextWrapped(U(G.aiMsg or "ГЋГІГўГҐГІ ГЇГ®ГїГўГЁГІГ±Гї Г§Г¤ГҐГ±Гј."))
         imgui.EndChild()
     end }
 
-    pages[15] = { "Модерация", function()
-        title("Модерация")
-        hint("Укажите ID или ник и текст (причину). Кнопки отправляют команду сразу, как при вводе в чат.")
-        imgui.Text(U("ID / ник")) imgui.SameLine()
+    pages[15] = { "ГЊГ®Г¤ГҐГ°Г Г¶ГЁГї", function()
+        title("ГЊГ®Г¤ГҐГ°Г Г¶ГЁГї")
+        hint("Г“ГЄГ Г¦ГЁГІГҐ ID ГЁГ«ГЁ Г­ГЁГЄ ГЁ ГІГҐГЄГ±ГІ (ГЇГ°ГЁГ·ГЁГ­Гі). ГЉГ­Г®ГЇГЄГЁ Г®ГІГЇГ°Г ГўГ«ГїГѕГІ ГЄГ®Г¬Г Г­Г¤Гі Г±Г°Г Г§Гі, ГЄГ ГЄ ГЇГ°ГЁ ГўГўГ®Г¤ГҐ Гў Г·Г ГІ.")
+        imgui.Text(U("ID / Г­ГЁГЄ")) imgui.SameLine()
         imgui.PushItemWidth(fs * 12) imgui.InputText("##modid", B.modId, 48) imgui.PopItemWidth()
-        imgui.SameLine() imgui.Text(U("Текст")) imgui.SameLine()
+        imgui.SameLine() imgui.Text(U("Г’ГҐГЄГ±ГІ")) imgui.SameLine()
         imgui.PushItemWidth(-1) imgui.InputText("##modtxt", B.modTxt, 160) imgui.PopItemWidth()
         local mid, mtx = trim(getBuf(B.modId)), trim(getBuf(B.modTxt))
         local bw = V2(fs * 9, fs * 2)
         local ACT = {
-            { "Гетто", "/ghetto", false },
-            { "Склад", "/warehouse", false },
-            { "Цвет банды", "/gzcolor", "text" },
-            { "Варн", "/warn", "idtext" },
-            { "Анварн", "/unwarn", "id" },
-            { "Мут", "/mute", "idtext" },
-            { "Размут", "/unmute", "id" },
-            { "Джайл", "/jail", "idtext" },
-            { "Из джайла", "/unjail", "id" },
-            { "Бан", "/ban", "idtext" },
-            { "Разбан", "/unban", "id" },
-            { "Статистика", "/getstats", "id" },
-            { "Инвентарь", "/checkinv", "id" },
+            { "ГѓГҐГІГІГ®", "/ghetto", false },
+            { "Г‘ГЄГ«Г Г¤", "/warehouse", false },
+            { "Г–ГўГҐГІ ГЎГ Г­Г¤Г»", "/gzcolor", "text" },
+            { "Г‚Г Г°Г­", "/warn", "idtext" },
+            { "ГЂГ­ГўГ Г°Г­", "/unwarn", "id" },
+            { "ГЊГіГІ", "/mute", "idtext" },
+            { "ГђГ Г§Г¬ГіГІ", "/unmute", "id" },
+            { "Г„Г¦Г Г©Г«", "/jail", "idtext" },
+            { "Г€Г§ Г¤Г¦Г Г©Г«Г ", "/unjail", "id" },
+            { "ГЃГ Г­", "/ban", "idtext" },
+            { "ГђГ Г§ГЎГ Г­", "/unban", "id" },
+            { "Г‘ГІГ ГІГЁГ±ГІГЁГЄГ ", "/getstats", "id" },
+            { "Г€Г­ГўГҐГ­ГІГ Г°Гј", "/checkinv", "id" },
         }
         for i, a in ipairs(ACT) do
             if imgui.Button(U(a[1]) .. "##mod" .. i, bw) then
                 local need = a[3]
                 if (need == "id" or need == "idtext") and mid == "" then
-                    G.modMsg = "Укажите ID или ник."
+                    G.modMsg = "Г“ГЄГ Г¦ГЁГІГҐ ID ГЁГ«ГЁ Г­ГЁГЄ."
                 elseif (need == "text" or need == "idtext") and mtx == "" then
-                    G.modMsg = "Заполните поле «Текст»."
+                    G.modMsg = "Г‡Г ГЇГ®Г«Г­ГЁГІГҐ ГЇГ®Г«ГҐ В«Г’ГҐГЄГ±ГІВ»."
                 else
                     local parts = { a[2] }
                     if need == "id" or need == "idtext" then parts[#parts + 1] = mid end
                     if need == "text" or need == "idtext" then parts[#parts + 1] = mtx end
                     local line = table.concat(parts, " ")
-                    G.modMsg = "Отправлено: " .. line
+                    G.modMsg = "ГЋГІГЇГ°Г ГўГ«ГҐГ­Г®: " .. line
                     post(function() safeSend(line) end)
                 end
             end
@@ -2570,42 +2570,42 @@ local function setupGui()
         if G.modMsg then imgui.TextColored(GRAY, U(G.modMsg)) end
     end }
 
-    pages[11] = { "Памятки", function()
-        title("Объявления и памятки")
+    pages[11] = { "ГЏГ Г¬ГїГІГЄГЁ", function()
+        title("ГЋГЎГєГїГўГ«ГҐГ­ГЁГї ГЁ ГЇГ Г¬ГїГІГЄГЁ")
         local bw = V2(fs * 14, fs * 2)
-        imgui.TextColored(YEL, U("Проверка активности: выберите должности"))
+        imgui.TextColored(YEL, U("ГЏГ°Г®ГўГҐГ°ГЄГ  Г ГЄГІГЁГўГ­Г®Г±ГІГЁ: ГўГ»ГЎГҐГ°ГЁГІГҐ Г¤Г®Г«Г¦Г­Г®Г±ГІГЁ"))
         for i, r in ipairs(ROLES) do
             if imgui.Selectable(U(r[2]) .. "##role" .. i, sel.roles[i] == true, 0, V2(fs * 6, fs * 1.4)) then sel.roles[i] = not sel.roles[i] end
             if i % 5 ~= 0 and i < #ROLES then imgui.SameLine() end
         end
-        if imgui.Button(U("Проверить выбранных") .. "##i1", bw) then
+        if imgui.Button(U("ГЏГ°Г®ГўГҐГ°ГЁГІГј ГўГ»ГЎГ°Г Г­Г­Г»Гµ") .. "##i1", bw) then
             local names = {}
             for i, r in ipairs(ROLES) do if sel.roles[i] then names[#names + 1] = r[3] end end
             post(function() infoDo("a1", names) end)
         end
         imgui.Spacing()
         imgui.SameLine()
-        if imgui.Button(U("Правила лидерам") .. "##i2", bw) then post(function() infoDo("rules") end) end
-        if imgui.Button(U("Инфо игрокам") .. "##i3", bw) then post(function() infoDo("inf") end) end
+        if imgui.Button(U("ГЏГ°Г ГўГЁГ«Г  Г«ГЁГ¤ГҐГ°Г Г¬") .. "##i2", bw) then post(function() infoDo("rules") end) end
+        if imgui.Button(U("Г€Г­ГґГ® ГЁГЈГ°Г®ГЄГ Г¬") .. "##i3", bw) then post(function() infoDo("inf") end) end
         imgui.SameLine()
-        if imgui.Button(U("Акция за онлайн") .. "##i4", bw) then post(function() infoDo("time") end) end
-        if imgui.Button(U("Вступление к раздаче") .. "##i5", bw) then post(function() infoDo("intro", getBuf(B.gwPrize)) end) end
+        if imgui.Button(U("ГЂГЄГ¶ГЁГї Г§Г  Г®Г­Г«Г Г©Г­") .. "##i4", bw) then post(function() infoDo("time") end) end
+        if imgui.Button(U("Г‚Г±ГІГіГЇГ«ГҐГ­ГЁГҐ ГЄ Г°Г Г§Г¤Г Г·ГҐ") .. "##i5", bw) then post(function() infoDo("intro", getBuf(B.gwPrize)) end) end
         imgui.SameLine()
-        hint("Приз берётся из поля раздач.")
+        hint("ГЏГ°ГЁГ§ ГЎГҐГ°ВёГІГ±Гї ГЁГ§ ГЇГ®Г«Гї Г°Г Г§Г¤Г Г·.")
         imgui.Spacing()
-        if imgui.Button(U("Правила каптов") .. "##i6", bw) then post(function() infoDo("capt") end) end
+        if imgui.Button(U("ГЏГ°Г ГўГЁГ«Г  ГЄГ ГЇГІГ®Гў") .. "##i6", bw) then post(function() infoDo("capt") end) end
         imgui.SameLine()
-        if imgui.Button(U("Правила бизваров") .. "##i7", bw) then post(function() infoDo("biz") end) end
+        if imgui.Button(U("ГЏГ°Г ГўГЁГ«Г  ГЎГЁГ§ГўГ Г°Г®Гў") .. "##i7", bw) then post(function() infoDo("biz") end) end
         imgui.Spacing()
-        hint("Вопрос лидеру в чат (ответ в чате только вам):")
+        hint("Г‚Г®ГЇГ°Г®Г± Г«ГЁГ¤ГҐГ°Гі Гў Г·Г ГІ (Г®ГІГўГҐГІ Гў Г·Г ГІГҐ ГІГ®Г«ГјГЄГ® ГўГ Г¬):")
         for i, v in ipairs(VOPROS) do
             if imgui.Button(tostring(i) .. "##q" .. i, V2(fs * 3, fs * 2)) then post(function() infoDo("q", tostring(i)) end) end
             if i < #VOPROS then imgui.SameLine() end
         end
     end }
 
-    pages[5] = { "Фракции", function()
-        title("Наборы, отборы, лидерки")
+    pages[5] = { "Г”Г°Г ГЄГ¶ГЁГЁ", function()
+        title("ГЌГ ГЎГ®Г°Г», Г®ГІГЎГ®Г°Г», Г«ГЁГ¤ГҐГ°ГЄГЁ")
         imgui.BeginChild("##frlist", V2(0, fs * 11), true)
         for i, f in ipairs(FRACTIONS) do
             if imgui.Selectable(U(f[2]) .. "##f" .. i, sel.fraction == i) then sel.fraction = i end
@@ -2613,18 +2613,18 @@ local function setupGui()
         imgui.EndChild()
         local f = FRACTIONS[sel.fraction]
         imgui.Spacing()
-        if not f then hint("Выберите фракцию.") return end
+        if not f then hint("Г‚Г»ГЎГҐГ°ГЁГІГҐ ГґГ°Г ГЄГ¶ГЁГѕ.") return end
         imgui.TextColored(YEL, U(f[2]))
-        if imgui.Button(U("Набор (/o)"), V2(fs * 9, fs * 2)) then post(function() recruit(f) end) end
+        if imgui.Button(U("ГЌГ ГЎГ®Г° (/o)"), V2(fs * 9, fs * 2)) then post(function() recruit(f) end) end
         imgui.SameLine()
-        if imgui.Button(U("Отбор (/aad)"), V2(fs * 9, fs * 2)) then post(function() tryoutAad(f) end) end
+        if imgui.Button(U("ГЋГІГЎГ®Г° (/aad)"), V2(fs * 9, fs * 2)) then post(function() tryoutAad(f) end) end
         imgui.SameLine()
-        if imgui.Button(U("Отбор (/o)"), V2(fs * 9, fs * 2)) then post(function() tryoutO(f) end) end
-        if imgui.Button(U("Взять лидерку"), V2(fs * 9, fs * 2)) then post(function() tempLeader(f) end) end
+        if imgui.Button(U("ГЋГІГЎГ®Г° (/o)"), V2(fs * 9, fs * 2)) then post(function() tryoutO(f) end) end
+        if imgui.Button(U("Г‚Г§ГїГІГј Г«ГЁГ¤ГҐГ°ГЄГі"), V2(fs * 9, fs * 2)) then post(function() tempLeader(f) end) end
     end }
 
-    pages[6] = { "Биндер", function()
-        title("Свои бинды")
+    pages[6] = { "ГЃГЁГ­Г¤ГҐГ°", function()
+        title("Г‘ГўГ®ГЁ ГЎГЁГ­Г¤Г»")
         local names = sortedBindNames()
         imgui.BeginChild("##bindlist", V2(fs * 12, fs * 10), true)
         for _, n in ipairs(names) do
@@ -2635,21 +2635,21 @@ local function setupGui()
         imgui.BeginChild("##bindinfo", V2(0, fs * 10), true)
         local b = binds[sel.bind]
         if b then
-            imgui.TextColored(YEL, U("/" .. sel.bind .. "  (пауза " .. b.delay .. " мс)"))
+            imgui.TextColored(YEL, U("/" .. sel.bind .. "  (ГЇГ ГіГ§Г  " .. b.delay .. " Г¬Г±)"))
             for i, l in ipairs(b.lines) do imgui.TextWrapped(toUi(i .. ". " .. l)) end
-        else hint("Выберите бинд слева или создайте новый ниже.") end
+        else hint("Г‚Г»ГЎГҐГ°ГЁГІГҐ ГЎГЁГ­Г¤ Г±Г«ГҐГўГ  ГЁГ«ГЁ Г±Г®Г§Г¤Г Г©ГІГҐ Г­Г®ГўГ»Г© Г­ГЁГ¦ГҐ.") end
         imgui.EndChild()
         if b then
             local name = sel.bind
-            if imgui.Button(U("Запустить"), V2(fs * 8, fs * 2)) then post(function() runBind(name, "") end) end
+            if imgui.Button(U("Г‡Г ГЇГіГ±ГІГЁГІГј"), V2(fs * 8, fs * 2)) then post(function() runBind(name, "") end) end
             imgui.SameLine()
-            if imgui.Button(U("Удалить бинд"), V2(fs * 9, fs * 2)) then post(function() bindDelete(name) sel.bind = "" end) end
+            if imgui.Button(U("Г“Г¤Г Г«ГЁГІГј ГЎГЁГ­Г¤"), V2(fs * 9, fs * 2)) then post(function() bindDelete(name) sel.bind = "" end) end
         end
-        imgui.Spacing() imgui.Separator() imgui.TextColored(ACC, U("Новый бинд / добавить строку"))
-        imgui.PushItemWidth(fs * 10) imgui.InputTextWithHint("##bname", U("имя"), B.bindName, 24) imgui.PopItemWidth()
-        imgui.SameLine() imgui.PushItemWidth(-fs * 7) imgui.InputTextWithHint("##btext", U("текст; несколько строк через ;;"), B.bindText, 256) imgui.PopItemWidth()
+        imgui.Spacing() imgui.Separator() imgui.TextColored(ACC, U("ГЌГ®ГўГ»Г© ГЎГЁГ­Г¤ / Г¤Г®ГЎГ ГўГЁГІГј Г±ГІГ°Г®ГЄГі"))
+        imgui.PushItemWidth(fs * 10) imgui.InputTextWithHint("##bname", U("ГЁГ¬Гї"), B.bindName, 24) imgui.PopItemWidth()
+        imgui.SameLine() imgui.PushItemWidth(-fs * 7) imgui.InputTextWithHint("##btext", U("ГІГҐГЄГ±ГІ; Г­ГҐГ±ГЄГ®Г«ГјГЄГ® Г±ГІГ°Г®ГЄ Г·ГҐГ°ГҐГ§ ;;"), B.bindText, 256) imgui.PopItemWidth()
         imgui.SameLine()
-        if imgui.Button(U("Добавить"), V2(fs * 6, 0)) then
+        if imgui.Button(U("Г„Г®ГЎГ ГўГЁГІГј"), V2(fs * 6, 0)) then
             local name, text = trim(getBuf(B.bindName)):lower(), getBuf(B.bindText)
             post(function()
                 local ok, msg, n2 = bindAdd(name, text)
@@ -2659,8 +2659,8 @@ local function setupGui()
         end
     end }
 
-    pages[7] = { "Шпаргалки", function()
-        title("Свои заметки")
+    pages[7] = { "ГГЇГ Г°ГЈГ Г«ГЄГЁ", function()
+        title("Г‘ГўГ®ГЁ Г§Г Г¬ГҐГІГЄГЁ")
         imgui.BeginChild("##notelist", V2(fs * 12, fs * 10), true)
         for i, n in ipairs(notes) do
             if imgui.Selectable(toUi(n.title) .. "##n" .. i, sel.note == i) then sel.note = i end
@@ -2670,17 +2670,17 @@ local function setupGui()
         imgui.BeginChild("##noteinfo", V2(0, fs * 10), true)
         local n = notes[sel.note]
         if n then for _, l in ipairs(n.lines) do imgui.TextWrapped(toUi(l)) end
-        else hint("Выберите заметку слева или создайте новую ниже.") end
+        else hint("Г‚Г»ГЎГҐГ°ГЁГІГҐ Г§Г Г¬ГҐГІГЄГі Г±Г«ГҐГўГ  ГЁГ«ГЁ Г±Г®Г§Г¤Г Г©ГІГҐ Г­Г®ГўГіГѕ Г­ГЁГ¦ГҐ.") end
         imgui.EndChild()
-        if n and imgui.Button(U("Удалить заметку"), V2(fs * 10, fs * 2)) then
+        if n and imgui.Button(U("Г“Г¤Г Г«ГЁГІГј Г§Г Г¬ГҐГІГЄГі"), V2(fs * 10, fs * 2)) then
             local idx = sel.note
             post(function() table.remove(notes, idx) saveNotes() sel.note = 0 end)
         end
-        imgui.Spacing() imgui.Separator() imgui.TextColored(ACC, U("Новая заметка / добавить строку"))
-        imgui.PushItemWidth(fs * 10) imgui.InputTextWithHint("##ntitle", U("название"), B.noteTitle, 48) imgui.PopItemWidth()
-        imgui.SameLine() imgui.PushItemWidth(-fs * 7) imgui.InputTextWithHint("##ntext", U("текст; несколько строк через ;;"), B.noteText, 256) imgui.PopItemWidth()
+        imgui.Spacing() imgui.Separator() imgui.TextColored(ACC, U("ГЌГ®ГўГ Гї Г§Г Г¬ГҐГІГЄГ  / Г¤Г®ГЎГ ГўГЁГІГј Г±ГІГ°Г®ГЄГі"))
+        imgui.PushItemWidth(fs * 10) imgui.InputTextWithHint("##ntitle", U("Г­Г Г§ГўГ Г­ГЁГҐ"), B.noteTitle, 48) imgui.PopItemWidth()
+        imgui.SameLine() imgui.PushItemWidth(-fs * 7) imgui.InputTextWithHint("##ntext", U("ГІГҐГЄГ±ГІ; Г­ГҐГ±ГЄГ®Г«ГјГЄГ® Г±ГІГ°Г®ГЄ Г·ГҐГ°ГҐГ§ ;;"), B.noteText, 256) imgui.PopItemWidth()
         imgui.SameLine()
-        if imgui.Button(U("Сохранить"), V2(fs * 6, 0)) then
+        if imgui.Button(U("Г‘Г®ГµГ°Г Г­ГЁГІГј"), V2(fs * 6, 0)) then
             local t, x = getBuf(B.noteTitle), getBuf(B.noteText)
             post(function()
                 local ok, msg = noteAdd(t, x)
@@ -2699,22 +2699,22 @@ local function setupGui()
         post(saveCfg)
     end
     local PRESETS = {
-        { "Синяя", 0.26, 0.62, 0.96 }, { "Красная", 0.92, 0.30, 0.30 }, { "Зелёная", 0.30, 0.78, 0.45 },
-        { "Фиолетовая", 0.62, 0.40, 0.95 }, { "Оранжевая", 0.98, 0.58, 0.20 },
+        { "Г‘ГЁГ­ГїГї", 0.26, 0.62, 0.96 }, { "ГЉГ°Г Г±Г­Г Гї", 0.92, 0.30, 0.30 }, { "Г‡ГҐГ«ВёГ­Г Гї", 0.30, 0.78, 0.45 },
+        { "Г”ГЁГ®Г«ГҐГІГ®ГўГ Гї", 0.62, 0.40, 0.95 }, { "ГЋГ°Г Г­Г¦ГҐГўГ Гї", 0.98, 0.58, 0.20 },
     }
 
-    pages[8] = { "Настройки", function()
-        title("Оформление окна")
-        imgui.Text(U("Цвет акцента")) imgui.PushItemWidth(fs * 16)
+    pages[8] = { "ГЌГ Г±ГІГ°Г®Г©ГЄГЁ", function()
+        title("ГЋГґГ®Г°Г¬Г«ГҐГ­ГЁГҐ Г®ГЄГ­Г ")
+        imgui.Text(U("Г–ГўГҐГІ Г ГЄГ¶ГҐГ­ГІГ ")) imgui.PushItemWidth(fs * 16)
         if imgui.ColorEdit3("##acc", accBuf) then applyColors() end
         imgui.PopItemWidth()
-        imgui.Text(U("Цвет фона")) imgui.PushItemWidth(fs * 16)
+        imgui.Text(U("Г–ГўГҐГІ ГґГ®Г­Г ")) imgui.PushItemWidth(fs * 16)
         if imgui.ColorEdit3("##bg", bgBuf) then applyColors() end
         imgui.PopItemWidth()
-        imgui.Text(U("Прозрачность фона")) imgui.PushItemWidth(fs * 16)
+        imgui.Text(U("ГЏГ°Г®Г§Г°Г Г·Г­Г®Г±ГІГј ГґГ®Г­Г ")) imgui.PushItemWidth(fs * 16)
         if imgui.SliderFloat("##alpha", alphaBuf, 0.5, 1.0) then applyColors() end
         imgui.PopItemWidth()
-        imgui.Spacing() imgui.Text(U("Готовые цвета акцента:"))
+        imgui.Spacing() imgui.Text(U("ГѓГ®ГІГ®ГўГ»ГҐ Г¶ГўГҐГІГ  Г ГЄГ¶ГҐГ­ГІГ :"))
         for i, p in ipairs(PRESETS) do
             if imgui.Button(U(p[1]) .. "##pr" .. i, V2(fs * 8, fs * 1.8)) then
                 accBuf[0], accBuf[1], accBuf[2] = p[2], p[3], p[4]
@@ -2722,67 +2722,67 @@ local function setupGui()
             end
             if i < #PRESETS then imgui.SameLine() end
         end
-        if imgui.Button(U("Сбросить цвета"), V2(fs * 10, fs * 1.8)) then
+        if imgui.Button(U("Г‘ГЎГ°Г®Г±ГЁГІГј Г¶ГўГҐГІГ "), V2(fs * 10, fs * 1.8)) then
             accBuf[0], accBuf[1], accBuf[2] = 0.26, 0.62, 0.96
             bgBuf[0], bgBuf[1], bgBuf[2] = 0.07, 0.08, 0.10
             alphaBuf[0] = 0.97
             applyColors()
         end
         imgui.Spacing()
-        if imgui.Checkbox(U("Стиль Liquid Glass (стекло)"), glassBuf) then
+        if imgui.Checkbox(U("Г‘ГІГЁГ«Гј Liquid Glass (Г±ГІГҐГЄГ«Г®)"), glassBuf) then
             cfg.glass = glassBuf[0] and true or false
             applyStyle()
             post(saveCfg)
         end
-        hint("Полупрозрачные панели и цветные блики. Прозрачность регулируется ползунком выше.")
-        if imgui.Checkbox(U("Лёгкий режим (если окно лагает)"), liteBuf) then
+        hint("ГЏГ®Г«ГіГЇГ°Г®Г§Г°Г Г·Г­Г»ГҐ ГЇГ Г­ГҐГ«ГЁ ГЁ Г¶ГўГҐГІГ­Г»ГҐ ГЎГ«ГЁГЄГЁ. ГЏГ°Г®Г§Г°Г Г·Г­Г®Г±ГІГј Г°ГҐГЈГіГ«ГЁГ°ГіГҐГІГ±Гї ГЇГ®Г«Г§ГіГ­ГЄГ®Г¬ ГўГ»ГёГҐ.")
+        if imgui.Checkbox(U("Г‹ВёГЈГЄГЁГ© Г°ГҐГ¦ГЁГ¬ (ГҐГ±Г«ГЁ Г®ГЄГ­Г® Г«Г ГЈГ ГҐГІ)"), liteBuf) then
             cfg.lite = liteBuf[0] and true or false
             applyStyle()
             post(saveCfg)
         end
-        hint("Убирает блики и прозрачность окна - заметно меньше нагрузка на телефоне.")
-        if imgui.Button(U("Показать анимацию открытия снова") .. "##introagain", V2(fs * 16, fs * 2)) then
+        hint("Г“ГЎГЁГ°Г ГҐГІ ГЎГ«ГЁГЄГЁ ГЁ ГЇГ°Г®Г§Г°Г Г·Г­Г®Г±ГІГј Г®ГЄГ­Г  - Г§Г Г¬ГҐГІГ­Г® Г¬ГҐГ­ГјГёГҐ Г­Г ГЈГ°ГіГ§ГЄГ  Г­Г  ГІГҐГ«ГҐГґГ®Г­ГҐ.")
+        if imgui.Button(U("ГЏГ®ГЄГ Г§Г ГІГј Г Г­ГЁГ¬Г Г¶ГЁГѕ Г®ГІГЄГ°Г»ГІГЁГї Г±Г­Г®ГўГ ") .. "##introagain", V2(fs * 16, fs * 2)) then
             cfg.introDone = false
             G.t0 = nil
             post(saveCfg)
         end
-        hint("Анимация показывается только при первом запуске.")
-        if imgui.Checkbox(U("Овальное уведомление о новом репорте (внизу экрана)"), repBuf) then
+        hint("ГЂГ­ГЁГ¬Г Г¶ГЁГї ГЇГ®ГЄГ Г§Г»ГўГ ГҐГІГ±Гї ГІГ®Г«ГјГЄГ® ГЇГ°ГЁ ГЇГҐГ°ГўГ®Г¬ Г§Г ГЇГіГ±ГЄГҐ.")
+        if imgui.Checkbox(U("ГЋГўГ Г«ГјГ­Г®ГҐ ГіГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГҐ Г® Г­Г®ГўГ®Г¬ Г°ГҐГЇГ®Г°ГІГҐ (ГўГ­ГЁГ§Гі ГЅГЄГ°Г Г­Г )"), repBuf) then
             cfg.reptoast = repBuf[0] and true or false
             post(saveCfg)
         end
-        if imgui.Checkbox(U("Проверять обновления при запуске"), updBuf) then
+        if imgui.Checkbox(U("ГЏГ°Г®ГўГҐГ°ГїГІГј Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГї ГЇГ°ГЁ Г§Г ГЇГіГ±ГЄГҐ"), updBuf) then
             cfg.autoupd = updBuf[0] and true or false
             post(saveCfg)
         end
-        if imgui.Button(U("Проверить обновления сейчас") .. "##updnow", V2(fs * 14, fs * 2)) then post(function() UPD.check(false) end) end
+        if imgui.Button(U("ГЏГ°Г®ГўГҐГ°ГЁГІГј Г®ГЎГ­Г®ГўГ«ГҐГ­ГЁГї Г±ГҐГ©Г·Г Г±") .. "##updnow", V2(fs * 14, fs * 2)) then post(function() UPD.check(false) end) end
         if UPD.status ~= "" then imgui.SameLine() imgui.TextColored(GRAY, toUi(UPD.status)) end
         imgui.Spacing() imgui.Separator() imgui.Spacing()
-        title("Мероприятия")
-        if imgui.Checkbox(U("После анонса МП вводить /mp и нажимать 1-ю строку"), autoBuf) then
+        title("ГЊГҐГ°Г®ГЇГ°ГЁГїГІГЁГї")
+        if imgui.Checkbox(U("ГЏГ®Г±Г«ГҐ Г Г­Г®Г­Г±Г  ГЊГЏ ГўГўГ®Г¤ГЁГІГј /mp ГЁ Г­Г Г¦ГЁГ¬Г ГІГј 1-Гѕ Г±ГІГ°Г®ГЄГі"), autoBuf) then
             cfg.automp = autoBuf[0] and true or false
             post(saveCfg)
         end
-        hint("То же вручную: /mpa. Переключатель командой: /fhset automp on|off.")
+        hint("Г’Г® Г¦ГҐ ГўГ°ГіГ·Г­ГіГѕ: /mpa. ГЏГҐГ°ГҐГЄГ«ГѕГ·Г ГІГҐГ«Гј ГЄГ®Г¬Г Г­Г¤Г®Г©: /fhset automp on|off.")
         imgui.Spacing() imgui.Separator() imgui.Spacing()
-        title("ИИ-ответы на репорты")
-        hint("Любой сервис с OpenAI-совместимым API (chat/completions). Нужны библиотеки effil и requests.")
-        hint("Ключ хранится в moonloader/config/FilippHelper_settings.txt - не выкладывайте этот файл.")
+        title("Г€Г€-Г®ГІГўГҐГІГ» Г­Г  Г°ГҐГЇГ®Г°ГІГ»")
+        hint("Г‹ГѕГЎГ®Г© Г±ГҐГ°ГўГЁГ± Г± OpenAI-Г±Г®ГўГ¬ГҐГ±ГІГЁГ¬Г»Г¬ API (chat/completions). ГЌГіГ¦Г­Г» ГЎГЁГЎГ«ГЁГ®ГІГҐГЄГЁ effil ГЁ requests.")
+        hint("ГЉГ«ГѕГ· ГµГ°Г Г­ГЁГІГ±Гї Гў moonloader/config/FilippHelper_settings.txt - Г­ГҐ ГўГ»ГЄГ«Г Г¤Г»ГўГ Г©ГІГҐ ГЅГІГ®ГІ ГґГ Г©Г«.")
         local pw = (imgui.InputTextFlags and imgui.InputTextFlags.Password) or 0
-        imgui.Text(U("Адрес API")) imgui.PushItemWidth(-1) imgui.InputText("##aiurl", B.aiUrl, 200) imgui.PopItemWidth()
-        imgui.Text(U("Ключ API")) imgui.PushItemWidth(-1) imgui.InputText("##aikey", B.aiKey, 200, pw) imgui.PopItemWidth()
-        imgui.Text(U("Модель")) imgui.PushItemWidth(-1) imgui.InputText("##aimodel", B.aiModel, 60) imgui.PopItemWidth()
-        imgui.Text(U("Инструкция для ИИ (правила вашего сервера, стиль ответа)"))
+        imgui.Text(U("ГЂГ¤Г°ГҐГ± API")) imgui.PushItemWidth(-1) imgui.InputText("##aiurl", B.aiUrl, 200) imgui.PopItemWidth()
+        imgui.Text(U("ГЉГ«ГѕГ· API")) imgui.PushItemWidth(-1) imgui.InputText("##aikey", B.aiKey, 200, pw) imgui.PopItemWidth()
+        imgui.Text(U("ГЊГ®Г¤ГҐГ«Гј")) imgui.PushItemWidth(-1) imgui.InputText("##aimodel", B.aiModel, 60) imgui.PopItemWidth()
+        imgui.Text(U("Г€Г­Г±ГІГ°ГіГЄГ¶ГЁГї Г¤Г«Гї Г€Г€ (ГЇГ°Г ГўГЁГ«Г  ГўГ ГёГҐГЈГ® Г±ГҐГ°ГўГҐГ°Г , Г±ГІГЁГ«Гј Г®ГІГўГҐГІГ )"))
         imgui.PushItemWidth(-1) imgui.InputText("##aiprompt", B.aiPrompt, 690) imgui.PopItemWidth()
-        if imgui.Button(U("Сохранить") .. "##aisave", V2(fs * 9, fs * 2)) then post(function() saveAi() fmsg("Настройки ИИ сохранены.") end) end
+        if imgui.Button(U("Г‘Г®ГµГ°Г Г­ГЁГІГј") .. "##aisave", V2(fs * 9, fs * 2)) then post(function() saveAi() fmsg("ГЌГ Г±ГІГ°Г®Г©ГЄГЁ Г€Г€ Г±Г®ГµГ°Г Г­ГҐГ­Г».") end) end
         imgui.SameLine()
-        if imgui.Button(U("Сохранить и проверить") .. "##aitest", V2(fs * 12, fs * 2)) then post(function() saveAi() AI.test() end) end
+        if imgui.Button(U("Г‘Г®ГµГ°Г Г­ГЁГІГј ГЁ ГЇГ°Г®ГўГҐГ°ГЁГІГј") .. "##aitest", V2(fs * 12, fs * 2)) then post(function() saveAi() AI.test() end) end
         if AI.status ~= "" then imgui.TextWrapped(toUi(AI.status)) end
     end }
 
-    pages[9] = { "Занять", function()
-        title("Занять задачу")
-        hint("Нажмите кнопку - в /a три раза подряд уйдёт «z ...».")
+    pages[9] = { "Г‡Г Г­ГїГІГј", function()
+        title("Г‡Г Г­ГїГІГј Г§Г Г¤Г Г·Гі")
+        hint("ГЌГ Г¦Г¬ГЁГІГҐ ГЄГ­Г®ГЇГЄГі - Гў /a ГІГ°ГЁ Г°Г Г§Г  ГЇГ®Г¤Г°ГїГ¤ ГіГ©Г¤ВёГІ В«z ...В».")
         imgui.Spacing()
         for i, c in ipairs(CLAIMS) do
             if imgui.Button(toUi("z " .. c[2]) .. "##z" .. i, V2(fs * 11, fs * 2)) then
@@ -2792,17 +2792,17 @@ local function setupGui()
             if i % 3 ~= 0 then imgui.SameLine() end
         end
         imgui.Spacing() imgui.Separator() imgui.Spacing()
-        imgui.Text(U("Свой текст (после «z »)"))
+        imgui.Text(U("Г‘ГўГ®Г© ГІГҐГЄГ±ГІ (ГЇГ®Г±Г«ГҐ В«z В»)"))
         imgui.PushItemWidth(-fs * 7) imgui.InputText("##claimtext", B.claim, 64) imgui.PopItemWidth()
         imgui.SameLine()
-        if imgui.Button(U("Занять") .. "##claimgo", V2(fs * 6, 0)) then
+        if imgui.Button(U("Г‡Г Г­ГїГІГј") .. "##claimgo", V2(fs * 6, 0)) then
             local txt = getBuf(B.claim)
             post(function() claim(txt) end)
         end
     end }
 
     ------------------------------------------------------------------
-    -- окно
+    -- Г®ГЄГ­Г®
     ------------------------------------------------------------------
     local function guarded(fn)
         local ok, err = pcall(fn)
@@ -2814,18 +2814,18 @@ local function setupGui()
     end
 
     local function drawBody()
-        -- левое меню
+        -- Г«ГҐГўГ®ГҐ Г¬ГҐГ­Гѕ
         imgui.BeginChild("##side", V2(fs * 10, 0), true)
         guarded(function()
             bigText("FilippHelper", ACC)
-            imgui.TextColored(GRAY, U("by ByFilipp  ·  v" .. VERSION))
+            imgui.TextColored(GRAY, U("by ByFilipp  В·  v" .. VERSION))
             imgui.Separator() imgui.Spacing()
-            -- группы меню; настройки всегда в самом низу
+            -- ГЈГ°ГіГЇГЇГ» Г¬ГҐГ­Гѕ; Г­Г Г±ГІГ°Г®Г©ГЄГЁ ГўГ±ГҐГЈГ¤Г  Гў Г±Г Г¬Г®Г¬ Г­ГЁГ§Гі
             local groups = {
-                { "ГЛАВНОЕ", { "Главная", "Репорты", "Проверка", "Мероприятия", "Раздачи" } },
-                { "АДМИНИСТРИРОВАНИЕ", { "Занять", "Фракции", "Транспорт", "Памятки" } },
-                { "МОДЕРАЦИЯ", { "Модерация" } },
-                { "ИНСТРУМЕНТЫ", { "ИИ", "Биндер", "Шпаргалки", "Команды" } },
+                { "ГѓГ‹ГЂГ‚ГЌГЋГ…", { "ГѓГ«Г ГўГ­Г Гї", "ГђГҐГЇГ®Г°ГІГ»", "ГЏГ°Г®ГўГҐГ°ГЄГ ", "ГЊГҐГ°Г®ГЇГ°ГЁГїГІГЁГї", "ГђГ Г§Г¤Г Г·ГЁ" } },
+                { "ГЂГ„ГЊГ€ГЌГ€Г‘Г’ГђГ€ГђГЋГ‚ГЂГЌГ€Г…", { "Г‡Г Г­ГїГІГј", "Г”Г°Г ГЄГ¶ГЁГЁ", "Г’Г°Г Г­Г±ГЇГ®Г°ГІ", "ГЏГ Г¬ГїГІГЄГЁ" } },
+                { "ГЊГЋГ„Г…ГђГЂГ–Г€Гџ", { "ГЊГ®Г¤ГҐГ°Г Г¶ГЁГї" } },
+                { "Г€ГЌГ‘Г’ГђГ“ГЊГ…ГЌГ’Г›", { "Г€Г€", "ГЃГЁГ­Г¤ГҐГ°", "ГГЇГ Г°ГЈГ Г«ГЄГЁ", "ГЉГ®Г¬Г Г­Г¤Г»" } },
             }
             local byName, used = {}, {}
             for i, p in ipairs(pages) do byName[p[1]] = i end
@@ -2845,18 +2845,18 @@ local function setupGui()
                     if i then drawBtn(i) end
                 end
                 if gi == #groups then
-                    for i, p in ipairs(pages) do   -- страницы, которых нет в группах
-                        if not used[i] and p[1] ~= "Настройки" then drawBtn(i) end
+                    for i, p in ipairs(pages) do   -- Г±ГІГ°Г Г­ГЁГ¶Г», ГЄГ®ГІГ®Г°Г»Гµ Г­ГҐГІ Гў ГЈГ°ГіГЇГЇГ Гµ
+                        if not used[i] and p[1] ~= "ГЌГ Г±ГІГ°Г®Г©ГЄГЁ" then drawBtn(i) end
                     end
                 end
             end
-            local si = byName["Настройки"]
+            local si = byName["ГЌГ Г±ГІГ°Г®Г©ГЄГЁ"]
             if si then imgui.Separator() imgui.Spacing() drawBtn(si) end
-            imgui.Spacing() imgui.TextColored(GRAY, U("Поддержка: @ByFilipp123"))
+            imgui.Spacing() imgui.TextColored(GRAY, U("ГЏГ®Г¤Г¤ГҐГ°Г¦ГЄГ : @ByFilipp123"))
         end)
         imgui.EndChild()
         imgui.SameLine()
-        -- правая часть
+        -- ГЇГ°Г ГўГ Гї Г·Г Г±ГІГј
         imgui.BeginChild("##content", V2(0, 0), true)
         guarded(function() pages[G.page][2]() end)
         imgui.EndChild()
@@ -2871,7 +2871,7 @@ local function setupGui()
         local function lift(v, d) return math.max(0, math.min(1, v + d)) end
         st.WindowPadding, st.FramePadding, st.ItemSpacing = V2(12, 12), V2(8, 6), V2(8, 8)
         if cfg.glass then
-            -- Liquid Glass: полупрозрачные панели, светлые тонкие границы, большие скругления
+            -- Liquid Glass: ГЇГ®Г«ГіГЇГ°Г®Г§Г°Г Г·Г­Г»ГҐ ГЇГ Г­ГҐГ«ГЁ, Г±ГўГҐГІГ«Г»ГҐ ГІГ®Г­ГЄГЁГҐ ГЈГ°Г Г­ГЁГ¶Г», ГЎГ®Г«ГјГёГЁГҐ Г±ГЄГ°ГіГЈГ«ГҐГ­ГЁГї
             st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding, st.ScrollbarRounding = 22, 16, 12, 10, 12
             st.WindowBorderSize, st.ChildBorderSize, st.FrameBorderSize = 1, 1, 1
             set("WindowBg", br, bg_, bb, cfg.lite and 1 or cfg.alpha * 0.6)
@@ -2902,7 +2902,7 @@ local function setupGui()
         end
     end
 
-    -- декор стекла: мягкие цветные блики за панелями и световая полоса сверху
+    -- Г¤ГҐГЄГ®Г° Г±ГІГҐГЄГ«Г : Г¬ГїГЈГЄГЁГҐ Г¶ГўГҐГІГ­Г»ГҐ ГЎГ«ГЁГЄГЁ Г§Г  ГЇГ Г­ГҐГ«ГїГ¬ГЁ ГЁ Г±ГўГҐГІГ®ГўГ Гї ГЇГ®Г«Г®Г±Г  Г±ГўГҐГ°ГµГі
     local function drawGlass()
         if not cfg.glass or cfg.lite or G.noDeco then return end
         local ok, err = pcall(function()
@@ -2929,7 +2929,7 @@ local function setupGui()
         end
     end
 
-    -- анимация открытия: вращающаяся искра, печатающееся название и надпись «ByFilipp & Claude»
+    -- Г Г­ГЁГ¬Г Г¶ГЁГї Г®ГІГЄГ°Г»ГІГЁГї: ГўГ°Г Г№Г ГѕГ№Г ГїГ±Гї ГЁГ±ГЄГ°Г , ГЇГҐГ·Г ГІГ ГѕГ№ГҐГҐГ±Гї Г­Г Г§ГўГ Г­ГЁГҐ ГЁ Г­Г Г¤ГЇГЁГ±Гј В«ByFilipp & ClaudeВ»
     local INTRO_T = 2.3
     local function drawIntro(age)
         local dl = imgui.GetWindowDrawList()
@@ -2961,7 +2961,7 @@ local function setupGui()
         centered(full:sub(1, n), sz.y / 2 + fs * 1.8, imgui.ImVec4(1, 1, 1, fade), true)
         local sa = math.max(0, math.min(1, (age - 1.1) / 0.5)) * fade
         centered("by ByFilipp  &  Claude", sz.y / 2 + fs * 4.4, imgui.ImVec4(ar, ag, ab, sa), false)
-        -- полоса загрузки
+        -- ГЇГ®Г«Г®Г±Г  Г§Г ГЈГ°ГіГ§ГЄГЁ
         local bw, by = sz.x * 0.28, p.y + sz.y / 2 + fs * 6.6
         local bx = cx - bw / 2
         dl:AddRectFilled(V2(bx, by), V2(bx + bw, by + 4), col(1, 1, 1, 0.12 * fade), 2)
@@ -2972,18 +2972,18 @@ local function setupGui()
         local ok, err = pcall(function()
             local io = imgui.GetIO()
             io.Fonts:AddFontFromFileTTF(fontPath, fs, nil, io.Fonts:GetGlyphRangesCyrillic())
-            -- второй (большой) шрифт не создаём: лишний атлас шрифтов ронял игру на слабых ПК; крупный текст делаем масштабом
+            -- ГўГІГ®Г°Г®Г© (ГЎГ®Г«ГјГёГ®Г©) ГёГ°ГЁГґГІ Г­ГҐ Г±Г®Г§Г¤Г ВёГ¬: Г«ГЁГёГ­ГЁГ© Г ГІГ«Г Г± ГёГ°ГЁГґГІГ®Гў Г°Г®Г­ГїГ« ГЁГЈГ°Гі Г­Г  Г±Г«Г ГЎГ»Гµ ГЏГЉ; ГЄГ°ГіГЇГ­Г»Г© ГІГҐГЄГ±ГІ Г¤ГҐГ«Г ГҐГ¬ Г¬Г Г±ГёГІГ ГЎГ®Г¬
             applyStyle()
         end)
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
-    -- метка «крутой разраб скрипта» над головой игрока Filipp_Evans (всегда включена,
-    -- видна всем, у кого стоит скрипт). Рисуется через imgui; запасной способ - render-функции MoonLoader (/tagmode).
+    -- Г¬ГҐГІГЄГ  В«ГЄГ°ГіГІГ®Г© Г°Г Г§Г°Г ГЎ Г±ГЄГ°ГЁГЇГІГ В» Г­Г Г¤ ГЈГ®Г«Г®ГўГ®Г© ГЁГЈГ°Г®ГЄГ  Filipp_Evans (ГўГ±ГҐГЈГ¤Г  ГўГЄГ«ГѕГ·ГҐГ­Г ,
+    -- ГўГЁГ¤Г­Г  ГўГ±ГҐГ¬, Гі ГЄГ®ГЈГ® Г±ГІГ®ГЁГІ Г±ГЄГ°ГЁГЇГІ). ГђГЁГ±ГіГҐГІГ±Гї Г·ГҐГ°ГҐГ§ imgui; Г§Г ГЇГ Г±Г­Г®Г© Г±ГЇГ®Г±Г®ГЎ - render-ГґГіГ­ГЄГ¶ГЁГЁ MoonLoader (/tagmode).
     local DEV_NICK, DEV_TEXT = "Filipp_Evans", "ByFilipp"
     local devState = { id = nil, t = -10 }
     local function devScreenPos()
-        -- пока SAMP не подключён к серверу, его функции вызывать нельзя (исключение в опкоде)
+        -- ГЇГ®ГЄГ  SAMP Г­ГҐ ГЇГ®Г¤ГЄГ«ГѕГ·ВёГ­ ГЄ Г±ГҐГ°ГўГҐГ°Гі, ГҐГЈГ® ГґГіГ­ГЄГ¶ГЁГЁ ГўГ»Г§Г»ГўГ ГІГј Г­ГҐГ«ГјГ§Гї (ГЁГ±ГЄГ«ГѕГ·ГҐГ­ГЁГҐ Гў Г®ГЇГЄГ®Г¤ГҐ)
         if isSampAvailable and not isSampAvailable() then return end
         if sampGetGamestate then
             local okG, gs = pcall(sampGetGamestate)
@@ -2991,7 +2991,7 @@ local function setupGui()
         end
         local now = os.clock()
         local okMe, myId = sampGetPlayerIdByCharHandle(PLAYER_PED)
-        if now - devState.t > 2 then          -- раз в 2 секунды ищем нужного игрока
+        if now - devState.t > 2 then          -- Г°Г Г§ Гў 2 Г±ГҐГЄГіГ­Г¤Г» ГЁГ№ГҐГ¬ Г­ГіГ¦Г­Г®ГЈГ® ГЁГЈГ°Г®ГЄГ 
             devState.t, devState.id = now, nil
             if okMe and sampGetPlayerNickname(myId) == DEV_NICK then devState.id = myId
             else
@@ -3034,7 +3034,7 @@ local function setupGui()
             local y = sy - fs * 1.6
             for i = 1, #txt do
                 local ch = txt:sub(i, i)
-                local k = 0.5 + 0.5 * math.sin(t * 3 - i * 0.7)          -- бегущая волна яркости
+                local k = 0.5 + 0.5 * math.sin(t * 3 - i * 0.7)          -- ГЎГҐГЈГіГ№Г Гї ГўГ®Г«Г­Г  ГїГ°ГЄГ®Г±ГІГЁ
                 local col = imgui.ColorConvertFloat4ToU32(imgui.ImVec4(0.1 + 0.25 * k, 0.55 + 0.45 * k, 0.2 + 0.2 * k, 1))
                 local shadow = imgui.ColorConvertFloat4ToU32(imgui.ImVec4(0, 0, 0, 0.8))
                 dl:AddText(V2(x + 1, y + 1), shadow, ch)
@@ -3043,7 +3043,7 @@ local function setupGui()
             end
         end)
         if not ok then
-            -- ошибка не должна убивать скрипт: в чат из кадра не пишем, делаем паузу и пробуем снова
+            -- Г®ГёГЁГЎГЄГ  Г­ГҐ Г¤Г®Г«Г¦Г­Г  ГіГЎГЁГўГ ГІГј Г±ГЄГ°ГЁГЇГІ: Гў Г·Г ГІ ГЁГ§ ГЄГ Г¤Г°Г  Г­ГҐ ГЇГЁГёГҐГ¬, Г¤ГҐГ«Г ГҐГ¬ ГЇГ ГіГ§Гі ГЁ ГЇГ°Г®ГЎГіГҐГ¬ Г±Г­Г®ГўГ 
             G.tagErr = tostring(err)
             G.tagFails = (G.tagFails or 0) + 1
             G.tagPause = os.clock() + 8
@@ -3052,7 +3052,7 @@ local function setupGui()
         end
     end)
 
-    -- запасной способ: render-функции MoonLoader (если есть), рисует независимо от imgui
+    -- Г§Г ГЇГ Г±Г­Г®Г© Г±ГЇГ®Г±Г®ГЎ: render-ГґГіГ­ГЄГ¶ГЁГЁ MoonLoader (ГҐГ±Г«ГЁ ГҐГ±ГІГј), Г°ГЁГ±ГіГҐГІ Г­ГҐГ§Г ГўГЁГ±ГЁГ¬Г® Г®ГІ imgui
     if renderCreateFont and renderFontDrawText then
         lua_thread.create(function()
             local font = renderCreateFont("Arial", 10, 5)
@@ -3077,7 +3077,7 @@ local function setupGui()
 
     function G.tagInfo() return { id = devState.id, mode = cfg.tagmode, off = G.noTag, err = G.tagErr } end
 
-    -- овальное уведомление о новом репорте (низ экрана по центру, цвет от акцента /fh)
+    -- Г®ГўГ Г«ГјГ­Г®ГҐ ГіГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГҐ Г® Г­Г®ГўГ®Г¬ Г°ГҐГЇГ®Г°ГІГҐ (Г­ГЁГ§ ГЅГЄГ°Г Г­Г  ГЇГ® Г¶ГҐГ­ГІГ°Гі, Г¶ГўГҐГІ Г®ГІ Г ГЄГ¶ГҐГ­ГІГ  /fh)
     local REP_T = 6
     imgui.OnFrame(function()
         if G.rep and (os.clock() - G.rep.t0 >= REP_T) then G.rep = nil end
@@ -3113,7 +3113,7 @@ local function setupGui()
                 local p = imgui.GetWindowPos()
                 dl:AddCircleFilled(V2(p.x + fs * 0.9, p.y + fs * 1.1), fs * 0.35 * (1 + 0.25 * math.sin(age * 8)),
                     imgui.ColorConvertFloat4ToU32(imgui.ImVec4(ar, ag, ab, 1)), 20)
-                local head = "Репорт от " .. r.name .. "[" .. r.id .. "]"
+                local head = "ГђГҐГЇГ®Г°ГІ Г®ГІ " .. r.name .. "[" .. r.id .. "]"
                 if r.more > 0 then head = head .. "  (+" .. r.more .. ")" end
                 bigText(head, imgui.ImVec4(math.min(1, ar + 0.35), math.min(1, ag + 0.35), math.min(1, ab + 0.35), 1))
                 imgui.PushTextWrapPos(w - fs * 3.2)
@@ -3126,7 +3126,7 @@ local function setupGui()
             if not ok then
                 G.noRepToast, G.repErr = true, tostring(err)
                 print("[FH] report toast disabled: " .. tostring(err))
-                fmsg("Уведомление о репорте отключено из-за ошибки: " .. tostring(err):sub(1, 90))
+                fmsg("Г“ГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГҐ Г® Г°ГҐГЇГ®Г°ГІГҐ Г®ГІГЄГ«ГѕГ·ГҐГ­Г® ГЁГ§-Г§Г  Г®ГёГЁГЎГЄГЁ: " .. tostring(err):sub(1, 90))
             end
         end
         imgui.End()
@@ -3167,7 +3167,7 @@ local function setupGui()
                 local okC, clicked = pcall(imgui.IsMouseClicked, 0)
                 if okC and clicked then G.t0 = os.clock() - INTRO_T end
             else
-                if cfg.intro and not cfg.introDone then   -- первый показ закончился: больше не повторяем
+                if cfg.intro and not cfg.introDone then   -- ГЇГҐГ°ГўГ»Г© ГЇГ®ГЄГ Г§ Г§Г ГЄГ®Г­Г·ГЁГ«Г±Гї: ГЎГ®Г«ГјГёГҐ Г­ГҐ ГЇГ®ГўГІГ®Г°ГїГҐГ¬
                     cfg.introDone = true
                     post(saveCfg)
                 end
@@ -3186,18 +3186,18 @@ local okG, gs = pcall(setupGui)
 if okG then guiState = gs else print("[FH] gui setup error: " .. tostring(gs)) end
 
 ----------------------------------------------------------------------
--- ОБРАБОТКА СООБЩЕНИЙ СЕРВЕРА
+-- ГЋГЃГђГЂГЃГЋГ’ГЉГЂ Г‘ГЋГЋГЃГ™Г…ГЌГ€Г‰ Г‘Г…ГђГ‚Г…ГђГЂ
 ----------------------------------------------------------------------
 local function onServerMessageImpl(color, text)
     if type(text) ~= "string" then return end
     text = fromGame(text)
     pcall(chkCollect, text)
-    if not text:find("Репорт", 1, true) then return end
+    if not text:find("ГђГҐГЇГ®Г°ГІ", 1, true) then return end
 
     local clean = text:gsub("{%x%x%x%x%x%x}", ""):gsub("%c", "")
-    local name, id, body = clean:match("Репорт от ([A-Za-z0-9_]+)%[(%d+)%]%s*:%s*(.+)")
+    local name, id, body = clean:match("ГђГҐГЇГ®Г°ГІ Г®ГІ ([A-Za-z0-9_]+)%[(%d+)%]%s*:%s*(.+)")
     if not name then return end
-    body = body:gsub("%s*|%s*Уже%s*%d+%s*репорт[^|]*$", "")
+    body = body:gsub("%s*|%s*Г“Г¦ГҐ%s*%d+%s*Г°ГҐГЇГ®Г°ГІ[^|]*$", "")
 
     table.insert(reports, 1, { name = name, id = id, text = body })
     pcall(function() if guiState and guiState.ready() then guiState.reportToast(reports[1]) end end)
@@ -3224,9 +3224,9 @@ function ev.onSendCommand(command)
 end
 
 ----------------------------------------------------------------------
--- ЗАПУСК
+-- Г‡ГЂГЏГ“Г‘ГЉ
 ----------------------------------------------------------------------
--- Перенесённые команды модерации и обёртки (своя реализация)
+-- ГЏГҐГ°ГҐГ­ГҐГ±ВёГ­Г­Г»ГҐ ГЄГ®Г¬Г Г­Г¤Г» Г¬Г®Г¤ГҐГ°Г Г¶ГЁГЁ ГЁ Г®ГЎВёГ°ГІГЄГЁ (Г±ГўГ®Гї Г°ГҐГ Г«ГЁГ§Г Г¶ГЁГї)
 local function registerPorted(reg)
     local scThread
     local function tgt(p)
@@ -3234,25 +3234,25 @@ local function registerPorted(reg)
         if p ~= "" then return p end
         return watchedId
     end
-    -- обёртки над серверными командами
+    -- Г®ГЎВёГ°ГІГЄГЁ Г­Г Г¤ Г±ГҐГ°ГўГҐГ°Г­Г»Г¬ГЁ ГЄГ®Г¬Г Г­Г¤Г Г¬ГЁ
     reg("gt", function() safeSend("/ghetto") end)
     reg("wh", function() safeSend("/warehouse") end)
-    reg("cb", function(p) if trim(p or "") ~= "" then safeSend("/warehouse " .. trim(p)) else fmsg("Укажите параметры: /cb [текст]") end end)
-    reg("gc", function(p) if trim(p or "") ~= "" then safeSend("/gzcolor " .. trim(p)) else fmsg("Укажите параметры: /gc [цвет]") end end)
+    reg("cb", function(p) if trim(p or "") ~= "" then safeSend("/warehouse " .. trim(p)) else fmsg("Г“ГЄГ Г¦ГЁГІГҐ ГЇГ Г°Г Г¬ГҐГІГ°Г»: /cb [ГІГҐГЄГ±ГІ]") end end)
+    reg("gc", function(p) if trim(p or "") ~= "" then safeSend("/gzcolor " .. trim(p)) else fmsg("Г“ГЄГ Г¦ГЁГІГҐ ГЇГ Г°Г Г¬ГҐГІГ°Г»: /gc [Г¶ГўГҐГІ]") end end)
     reg("sprod", function(p)
         local a, b = (p or ""):match("(%d+)%s+(%d+)")
-        if a then safeSend("/setbizprod " .. a .. " " .. b) else fmsg("Использование: /sprod [ID бизнеса] [число]") end
+        if a then safeSend("/setbizprod " .. a .. " " .. b) else fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /sprod [ID ГЎГЁГ§Г­ГҐГ±Г ] [Г·ГЁГ±Г«Г®]") end
     end)
     reg("wn", function(p)
         p = trim(p or "")
         if p:match("^%d+%s+%S") then safeSend("/warn " .. p)
-        else fmsg("Использование: /wn [ID] [причина]") end
+        else fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /wn [ID] [ГЇГ°ГЁГ·ГЁГ­Г ]") end
     end)
-    -- команды с ID: вставляют команду в строку чата (как у Бруно, но ID по умолчанию из /re)
+    -- ГЄГ®Г¬Г Г­Г¤Г» Г± ID: ГўГ±ГІГ ГўГ«ГїГѕГІ ГЄГ®Г¬Г Г­Г¤Гі Гў Г±ГІГ°Г®ГЄГі Г·Г ГІГ  (ГЄГ ГЄ Гі ГЃГ°ГіГ­Г®, Г­Г® ID ГЇГ® ГіГ¬Г®Г«Г·Г Г­ГЁГѕ ГЁГ§ /re)
     local function regId(cmd, sCmd, input)
         reg(cmd, function(p)
             local id = tgt(p)
-            if not id then fmsg("Укажите ID: /" .. cmd .. " ID (или сначала /re ID)") return end
+            if not id then fmsg("Г“ГЄГ Г¦ГЁГІГҐ ID: /" .. cmd .. " ID (ГЁГ«ГЁ Г±Г­Г Г·Г Г«Г  /re ID)") return end
             if input then
                 if sampSetChatInputText then sampSetChatInputText("/" .. sCmd .. " " .. id .. " ") end
                 if sampSetChatInputEnabled then sampSetChatInputEnabled(true) end
@@ -3263,19 +3263,19 @@ local function registerPorted(reg)
     end
     regId("jl", "jail", true) regId("mt", "mute", true)
     regId("as", "getstats", false) regId("ci", "checkinv", false)
-    -- снятие и бан
+    -- Г±Г­ГїГІГЁГҐ ГЁ ГЎГ Г­
     local function regArg(cmd, sCmd)
         reg(cmd, function(p)
             p = trim(p or "")
-            if p ~= "" then safeSend("/" .. sCmd .. " " .. p) else fmsg("Использование: /" .. cmd .. " [ID или ник]") end
+            if p ~= "" then safeSend("/" .. sCmd .. " " .. p) else fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /" .. cmd .. " [ID ГЁГ«ГЁ Г­ГЁГЄ]") end
         end)
     end
     regArg("uwn", "unwarn") regArg("ujl", "unjail") regArg("um", "unmute") regArg("bn", "ban") regArg("ubn", "unban")
-    -- таймер удаления и респавна транспорта
+    -- ГІГ Г©Г¬ГҐГ° ГіГ¤Г Г«ГҐГ­ГЁГї ГЁ Г°ГҐГ±ГЇГ ГўГ­Г  ГІГ°Г Г­Г±ГЇГ®Г°ГІГ 
     reg("sc", function()
         if scThread then pcall(function() scThread:terminate() end) end
         scThread = lua_thread.create(function()
-            safeSend("/a Внимание, через 15 секунд удаляю и респавню весь транспорт на сервере!")
+            safeSend("/a Г‚Г­ГЁГ¬Г Г­ГЁГҐ, Г·ГҐГ°ГҐГ§ 15 Г±ГҐГЄГіГ­Г¤ ГіГ¤Г Г«ГїГѕ ГЁ Г°ГҐГ±ГЇГ ГўГ­Гѕ ГўГҐГ±Гј ГІГ°Г Г­Г±ГЇГ®Г°ГІ Г­Г  Г±ГҐГ°ГўГҐГ°ГҐ!")
             wait(15000)
             safeSend("/dvall") wait(1500)
             safeSend("/spawncars")
@@ -3286,8 +3286,8 @@ local function registerPorted(reg)
         if scThread then
             pcall(function() scThread:terminate() end)
             scThread = nil
-            fmsg("Таймер респавна транспорта остановлен.")
-        else fmsg("Таймер респавна транспорта не запущен.") end
+            fmsg("Г’Г Г©Г¬ГҐГ° Г°ГҐГ±ГЇГ ГўГ­Г  ГІГ°Г Г­Г±ГЇГ®Г°ГІГ  Г®Г±ГІГ Г­Г®ГўГ«ГҐГ­.")
+        else fmsg("Г’Г Г©Г¬ГҐГ° Г°ГҐГ±ГЇГ ГўГ­Г  ГІГ°Г Г­Г±ГЇГ®Г°ГІГ  Г­ГҐ Г§Г ГЇГіГ№ГҐГ­.") end
     end)
 end
 
@@ -3302,19 +3302,19 @@ local function registerCommands(reg)
     reg("tagmode", function()
         cfg.tagmode = (cfg.tagmode == 0) and 1 or 0
         saveCfg()
-        fmsg("Метка над игроком: способ " .. (cfg.tagmode == 0 and "imgui (основной)" or "render (запасной)") .. ".")
+        fmsg("ГЊГҐГІГЄГ  Г­Г Г¤ ГЁГЈГ°Г®ГЄГ®Г¬: Г±ГЇГ®Г±Г®ГЎ " .. (cfg.tagmode == 0 and "imgui (Г®Г±Г­Г®ГўГ­Г®Г©)" or "render (Г§Г ГЇГ Г±Г­Г®Г©)") .. ".")
     end)
     reg("fcmd", uiMenu)
     reg("gw", function(p) gwStart(p, false) end)
     reg("gwlast", function(p) gwStart(p, true) end)
     reg("gwstop", function()
-        if gw.active then gw.active = false gw.last = false fmsg("Раздача отменена.")
-        else fmsg("Сейчас нет активной раздачи.") end
+        if gw.active then gw.active = false gw.last = false fmsg("ГђГ Г§Г¤Г Г·Г  Г®ГІГ¬ГҐГ­ГҐГ­Г .")
+        else fmsg("Г‘ГҐГ©Г·Г Г± Г­ГҐГІ Г ГЄГІГЁГўГ­Г®Г© Г°Г Г§Г¤Г Г·ГЁ.") end
     end)
     reg("rr", function(p)
         local id, text = p:match("^(%d+)%s+(.+)$")
         if not id then id, text = watchedId, p end
-        if not id or not replyTo(id, text) then fmsg("Использование: /rr [ID] текст") end
+        if not id or not replyTo(id, text) then fmsg("Г€Г±ГЇГ®Г«ГјГ§Г®ГўГ Г­ГЁГҐ: /rr [ID] ГІГҐГЄГ±ГІ") end
     end)
 end
 
@@ -3323,7 +3323,7 @@ function main()
     if isSampfuncsLoaded and not isSampfuncsLoaded() then return end
     while isSampAvailable and not isSampAvailable() do wait(100) end
 
-    -- Защитные обёртки: обрезка длины, pcall -- команды и диалоги не должны ронять игру
+    -- Г‡Г Г№ГЁГІГ­Г»ГҐ Г®ГЎВёГ°ГІГЄГЁ: Г®ГЎГ°ГҐГ§ГЄГ  Г¤Г«ГЁГ­Г», pcall -- ГЄГ®Г¬Г Г­Г¤Г» ГЁ Г¤ГЁГ Г«Г®ГЈГЁ Г­ГҐ Г¤Г®Г«Г¦Г­Г» Г°Г®Г­ГїГІГј ГЁГЈГ°Гі
     local rawAdd, rawDialog, rawReg, rawInput = sampAddChatMessage, sampShowDialog, sampRegisterChatCommand, sampSetChatInputText
     sampAddChatMessage = function(t, c)
         t = toGame(tostring(t or ""))
@@ -3342,7 +3342,7 @@ function main()
             local ok, err = pcall(fn, type(arg) == "string" and fromGame(arg) or "")
             if not ok then
                 print("[FH] command /" .. name .. " error: " .. tostring(err))
-                fmsg("{FF3333}Ошибка в команде /" .. name .. ", подробности в moonloader.log")
+                fmsg("{FF3333}ГЋГёГЁГЎГЄГ  Гў ГЄГ®Г¬Г Г­Г¤ГҐ /" .. name .. ", ГЇГ®Г¤Г°Г®ГЎГ­Г®Г±ГІГЁ Гў moonloader.log")
             end
         end)
     end
@@ -3354,7 +3354,7 @@ function main()
     local okB, errB = pcall(setupBinder, builtin, guardedReg)
     if not okB then print("[FH] binder setup error: " .. tostring(errB)) end
 
-    -- всё, что трогает чат и SAMP, - только когда игра подключена к серверу
+    -- ГўГ±Вё, Г·ГІГ® ГІГ°Г®ГЈГ ГҐГІ Г·Г ГІ ГЁ SAMP, - ГІГ®Г«ГјГЄГ® ГЄГ®ГЈГ¤Г  ГЁГЈГ°Г  ГЇГ®Г¤ГЄГ«ГѕГ·ГҐГ­Г  ГЄ Г±ГҐГ°ГўГҐГ°Гі
     if sampGetGamestate then
         while true do
             local okG, gs = pcall(sampGetGamestate)
@@ -3363,15 +3363,15 @@ function main()
         end
     end
     wait(1500)
-    fmsg("{FFD700}FilippHelper v" .. VERSION .. " {FFFFFF}- загружен")
-    fmsg("{A9A9A9}Автор и разработчик: {66CCFF}ByFilipp {A9A9A9}| при участии {66CCFF}Claude {A9A9A9}(Anthropic)")
-    fmsg("{A9A9A9}Раздачи, репорты, мероприятия, проверка активности, транспорт, биндер и ИИ-ответы - в одном окне")
-    fmsg("{A9A9A9}Окно управления: {FFFF00}/fh {A9A9A9}| все команды: {FFFF00}/fcmd {A9A9A9}| биндер: {FFFF00}/fbind")
-    fmsg("{A9A9A9}Обновления: {FFFF00}/fhupd {A9A9A9}| диагностика: {FFFF00}/fhdiag {A9A9A9}| проверка уведомления: {FFFF00}/reptest")
-    fmsg("{A9A9A9}Поддержка и вопросы: {FFFF00}@ByFilipp123 {A9A9A9}- приятной игры!")
+    fmsg("{FFD700}FilippHelper v" .. VERSION .. " {FFFFFF}- Г§Г ГЈГ°ГіГ¦ГҐГ­")
+    fmsg("{A9A9A9}ГЂГўГІГ®Г° ГЁ Г°Г Г§Г°Г ГЎГ®ГІГ·ГЁГЄ: {66CCFF}ByFilipp {A9A9A9}| ГЇГ°ГЁ ГіГ·Г Г±ГІГЁГЁ {66CCFF}Claude {A9A9A9}(Anthropic)")
+    fmsg("{A9A9A9}ГђГ Г§Г¤Г Г·ГЁ, Г°ГҐГЇГ®Г°ГІГ», Г¬ГҐГ°Г®ГЇГ°ГЁГїГІГЁГї, ГЇГ°Г®ГўГҐГ°ГЄГ  Г ГЄГІГЁГўГ­Г®Г±ГІГЁ, ГІГ°Г Г­Г±ГЇГ®Г°ГІ, ГЎГЁГ­Г¤ГҐГ° ГЁ Г€Г€-Г®ГІГўГҐГІГ» - Гў Г®Г¤Г­Г®Г¬ Г®ГЄГ­ГҐ")
+    fmsg("{A9A9A9}ГЋГЄГ­Г® ГіГЇГ°Г ГўГ«ГҐГ­ГЁГї: {FFFF00}/fh {A9A9A9}| ГўГ±ГҐ ГЄГ®Г¬Г Г­Г¤Г»: {FFFF00}/fcmd {A9A9A9}| ГЎГЁГ­Г¤ГҐГ°: {FFFF00}/fbind")
+    fmsg("{A9A9A9}ГЋГЎГ­Г®ГўГ«ГҐГ­ГЁГї: {FFFF00}/fhupd {A9A9A9}| Г¤ГЁГ ГЈГ­Г®Г±ГІГЁГЄГ : {FFFF00}/fhdiag {A9A9A9}| ГЇГ°Г®ГўГҐГ°ГЄГ  ГіГўГҐГ¤Г®Г¬Г«ГҐГ­ГЁГї: {FFFF00}/reptest")
+    fmsg("{A9A9A9}ГЏГ®Г¤Г¤ГҐГ°Г¦ГЄГ  ГЁ ГўГ®ГЇГ°Г®Г±Г»: {FFFF00}@ByFilipp123 {A9A9A9}- ГЇГ°ГЁГїГІГ­Г®Г© ГЁГЈГ°Г»!")
     if cfg.autoupd then
         lua_thread.create(function()
-            wait(15000)   -- не мешаем загрузке игры
+            wait(15000)   -- Г­ГҐ Г¬ГҐГёГ ГҐГ¬ Г§Г ГЈГ°ГіГ§ГЄГҐ ГЁГЈГ°Г»
             pcall(UPD.check, true)
         end)
     end
