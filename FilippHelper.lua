@@ -1806,6 +1806,20 @@ local function registerExtra(reg)
     reg("aiset", function(p) AI.cmdSet(p) end)
     reg("aidiag", function() AI.diag() end)
     reg("fhupd", function(p) UPD.cmd(p) end)
+    reg("fhdiag", function()
+        local g = guiState and guiState.diag()
+        fmsg("Кодировка: " .. (enc8 and "библиотека encoding" or "запасная (encoding не найдена)"))
+        fmsg("Окно /fh: " .. (g and (g.disabled and "отключено из-за ошибок" or g.init and "не запустилось" or "готово") or "недоступно (нет mimgui)"))
+        fmsg("Уведомление о репорте: " .. (not cfg.reptoast and "выключено в настройках" or (g and g.off) and ("сломалось: " .. tostring(g.err)) or "включено") ..
+            ". Репортов получено: " .. #reports)
+    end)
+    reg("reptest", function(p)
+        local text = trim(p or "")
+        if text == "" then text = "Тестовый репорт: проверка уведомления" end
+        local shown = false
+        pcall(function() if guiState and guiState.ready() then shown = guiState.reportToast({ name = "Test_Player", id = "7", text = text }) end end)
+        fmsg(shown and "Тестовое уведомление запущено." or "Уведомление не показано. Подробности: /fhdiag")
+    end)
     reg("chkres", function() INFO.chkres() end)
     reg("chkend", function() INFO.chkend() end)
     reg("a1", function(p) if (p or "") == "" then INFO.a1() else INFO.a1args(p) end end)
@@ -1945,6 +1959,7 @@ local MENU_ROWS = {
     { "#", "Репорты" },
     { "/reports", "последние 15 репортов, быстрый ответ" },
     { "/rr [ID] текст", "ответить игроку через /pm" },
+    { "/reptest  /fhdiag", "проверка овального уведомления о репорте; диагностика кодировки и окна" },
     { "/fhupd [install]", "проверка обновлений на GitHub; install - скачать и установить" },
     { "/ai [ID]  /aiset  /aidiag", "ИИ-подсказка ответа на репорт; настройка API (/aiset url|key|model|prompt); /aidiag - что доступно для запросов" },
     { "/ar ID", "ответ + текст жалобы в /a" },
@@ -2529,11 +2544,11 @@ local function setupGui()
             post(saveCfg)
         end
         hint("Анимация показывается только при первом запуске.")
-        if imgui.Checkbox(U("Метка «крутой разраб скрипта» у Filipp_Evans в чате"), tagBuf) then
+        if imgui.Checkbox(U("Метка «Крутой разраб скрипта» над игроком Filipp_Evans"), tagBuf) then
             cfg.devtag = tagBuf[0] and true or false
             post(saveCfg)
         end
-        hint("Метка видна только вам (меняется только ваш чат).")
+        hint("Рисуется над головой игрока у всех, у кого установлен скрипт.")
         if imgui.Checkbox(U("Овальное уведомление о новом репорте (внизу экрана)"), repBuf) then
             cfg.reptoast = repBuf[0] and true or false
             post(saveCfg)
@@ -2764,6 +2779,58 @@ local function setupGui()
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
+    -- метка «крутой разраб скрипта» над головой игрока Filipp_Evans (видна всем, у кого стоит скрипт)
+    local DEV_NICK, DEV_TEXT = "Filipp_Evans", "Крутой разраб скрипта"
+    local devState = { id = nil, t = 0 }
+    imgui.OnFrame(function() return cfg.devtag and not G.noTag and not G.disabled and not G.initFailed end, function(self)
+        self.HideCursor = true
+        local ok, err = pcall(function()
+            local now = os.clock()
+            local okMe, myId = sampGetPlayerIdByCharHandle(PLAYER_PED)
+            if now - devState.t > 2 then          -- раз в 2 секунды ищем нужного игрока
+                devState.t, devState.id = now, nil
+                if okMe and sampGetPlayerNickname(myId) == DEV_NICK then devState.id = myId
+                else
+                    for id = 0, sampGetMaxPlayerId(false) do
+                        if sampIsPlayerConnected(id) and sampGetPlayerNickname(id) == DEV_NICK then devState.id = id break end
+                    end
+                end
+            end
+            local id = devState.id
+            if not id then return end
+            local ped = PLAYER_PED
+            if not (okMe and id == myId) then
+                local okP, h = sampGetCharHandleBySampPlayerId(id)
+                if not okP then return end
+                ped = h
+            end
+            if not doesCharExist(ped) then return end
+            local x, y, z = getCharCoordinates(ped)
+            local px, py, pz = getCharCoordinates(PLAYER_PED)
+            local dx, dy, dz = x - px, y - py, z - pz
+            if dx * dx + dy * dy + dz * dz > 70 * 70 then return end
+            if isPointOnScreen and not isPointOnScreen(x, y, z + 1.4, 1) then return end
+            local sx, sy = convert3DCoordsToScreen(x, y, z + 1.45)
+            if not sx or sx < 0 or sy < 0 or sx > sw or sy > sh then return end
+            local dl = imgui.GetBackgroundDrawList()
+            local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
+            local txt = U(DEV_TEXT)
+            local w = imgui.CalcTextSize(txt).x
+            local padX, padY = fs * 0.7, fs * 0.25
+            local x0, y0 = sx - w / 2 - padX, sy - fs * 1.4 - padY
+            local pulse = 0.85 + 0.15 * math.sin(now * 3)
+            dl:AddRectFilled(V2(x0, y0), V2(x0 + w + padX * 2, y0 + fs * 1.1 + padY * 2),
+                imgui.ColorConvertFloat4ToU32(imgui.ImVec4(ar * 0.25, ag * 0.25, ab * 0.25, 0.85)), fs * 0.9)
+            dl:AddRect(V2(x0, y0), V2(x0 + w + padX * 2, y0 + fs * 1.1 + padY * 2),
+                imgui.ColorConvertFloat4ToU32(imgui.ImVec4(1, 0.84, 0, pulse)), fs * 0.9, 15, 2)
+            dl:AddText(V2(x0 + padX, y0 + padY), imgui.ColorConvertFloat4ToU32(imgui.ImVec4(1, 0.84, 0, 1)), txt)
+        end)
+        if not ok then
+            G.noTag = true
+            print("[FH] dev tag disabled: " .. tostring(err))
+        end
+    end)
+
     -- овальное уведомление о новом репорте (низ экрана по центру, цвет от акцента /fh)
     local REP_T = 6
     imgui.OnFrame(function()
@@ -2775,7 +2842,7 @@ local function setupGui()
         local age = os.clock() - r.t0
         local slide = 1 - (1 - math.min(1, age / 0.45)) ^ 3
         local fade = age > REP_T - 0.6 and math.max(0, (REP_T - age) / 0.6) or 1
-        local w = math.min(sw * 0.8, fs * 30)
+        local w = math.min(sw * 0.92, fs * 38)
         local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
         local flags = 0
         pcall(function()
@@ -2804,10 +2871,17 @@ local function setupGui()
                 if r.more > 0 then head = head .. "  (+" .. r.more .. ")" end
                 bigText(head, imgui.ImVec4(math.min(1, ar + 0.35), math.min(1, ag + 0.35), math.min(1, ab + 0.35), 1))
                 imgui.PushTextWrapPos(w - fs * 3.2)
+                local bigBody = G.big and pcall(imgui.PushFont, G.big)
+                if not bigBody then pcall(imgui.SetWindowFontScale, 1.35) end
                 imgui.TextColored(imgui.ImVec4(1, 1, 1, 1), U(r.text))
+                if bigBody then imgui.PopFont() else pcall(imgui.SetWindowFontScale, 1) end
                 imgui.PopTextWrapPos()
             end)
-            if not ok then G.noRepToast = true print("[FH] report toast disabled: " .. tostring(err)) end
+            if not ok then
+                G.noRepToast, G.repErr = true, tostring(err)
+                print("[FH] report toast disabled: " .. tostring(err))
+                fmsg("Уведомление о репорте отключено из-за ошибки: " .. tostring(err):sub(1, 90))
+            end
         end
         imgui.End()
         if nCol > 0 then imgui.PopStyleColor(nCol) end
@@ -2819,6 +2893,11 @@ local function setupGui()
         if #text > 220 then text = text:sub(1, 217) .. "..." end
         local more = (G.rep and (os.clock() - G.rep.t0) < REP_T) and (G.rep.more + 1) or 0
         G.rep = { name = rep.name, id = rep.id, text = text, t0 = os.clock(), more = more }
+        return cfg.reptoast and not G.noRepToast and not G.disabled and not G.initFailed
+    end
+
+    function G.diag()
+        return { toast = cfg.reptoast, off = G.noRepToast, err = G.repErr, disabled = G.disabled, init = G.initFailed }
     end
 
     imgui.OnFrame(function()
@@ -2884,24 +2963,9 @@ local function onServerMessageImpl(color, text)
     end
 end
 
--- метка у ника разработчика (меняется только ваш чат)
-local DEV_NICK = "Filipp_Evans"
-local function devTagText(color, text)
-    if not text:find(DEV_NICK, 1, true) or text:find(toGame("разраб скрипта"), 1, true) then return nil end
-    local rgb = math.floor((tonumber(color) or 0) % 4294967296 / 256) % 16777216
-    local tag = toGame(" {FFD700}[Крутой разраб скрипта]{" .. string.format("%06X", rgb) .. "}")
-    local out, n = text:gsub("(" .. DEV_NICK .. "%[?%d*%]?)", "%1" .. tag:gsub("%%", "%%%%"), 1)
-    if n == 0 then return nil end
-    return out
-end
-
 function ev.onServerMessage(color, text)
     local ok, err = pcall(onServerMessageImpl, color, text)
     if not ok then print("[FH] onServerMessage error: " .. tostring(err)) end
-    if cfg.devtag and type(text) == "string" then
-        local okT, newText = pcall(devTagText, color, text)
-        if okT and newText then return { color, newText } end
-    end
 end
 
 function ev.onSendCommand(command)
@@ -2971,8 +3035,11 @@ function main()
     if not okB then print("[FH] binder setup error: " .. tostring(errB)) end
 
     fmsg("{FFD700}FilippHelper v" .. VERSION .. " {FFFFFF}- загружен")
-    fmsg("{A9A9A9}Автор: {66CCFF}ByFilipp {A9A9A9}| при участии {66CCFF}Claude {A9A9A9}(Anthropic)")
-    fmsg("{A9A9A9}Меню: {FFFF00}/fh {A9A9A9}| команды: {FFFF00}/fcmd {A9A9A9}| поддержка: {FFFF00}@ByFilipp123")
+    fmsg("{A9A9A9}Автор и разработчик: {66CCFF}ByFilipp {A9A9A9}| при участии {66CCFF}Claude {A9A9A9}(Anthropic)")
+    fmsg("{A9A9A9}Раздачи, репорты, мероприятия, проверка активности, транспорт, биндер и ИИ-ответы - в одном окне")
+    fmsg("{A9A9A9}Окно управления: {FFFF00}/fh {A9A9A9}| все команды: {FFFF00}/fcmd {A9A9A9}| биндер: {FFFF00}/fbind")
+    fmsg("{A9A9A9}Обновления: {FFFF00}/fhupd {A9A9A9}| диагностика: {FFFF00}/fhdiag {A9A9A9}| проверка уведомления: {FFFF00}/reptest")
+    fmsg("{A9A9A9}Поддержка и вопросы: {FFFF00}@ByFilipp123 {A9A9A9}- приятной игры!")
     if cfg.autoupd then
         lua_thread.create(function()
             wait(15000)   -- не мешаем загрузке игры
