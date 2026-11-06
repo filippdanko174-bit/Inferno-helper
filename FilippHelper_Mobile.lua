@@ -421,7 +421,8 @@ local cfg = {
     glass = true,                   -- стиль Liquid Glass (стекло)
     devtag = true,                  -- метка «крутой разраб скрипта» у ника Filipp_Evans
     autoupd = true,                 -- проверять обновления при запуске
-    intro = true,                   -- анимация открытия окна
+    intro = true,                   -- анимация открытия окна (только при первом запуске)
+    introDone = false,              -- анимация уже показана
     lite = LITE_DEFAULT,            -- лёгкий режим: без бликов и прозрачности (меньше лагов)
     aiUrl = "https://api.openai.com/v1/chat/completions",
     aiKey = "",
@@ -448,7 +449,7 @@ local function saveCfg()
         f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
-        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "devtag=", cfg.devtag and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
+        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "devtag=", cfg.devtag and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "introdone=", cfg.introDone and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
         f:write("aiurl=", cfg.aiUrl, "\r\n", "aikey=", cfg.aiKey, "\r\n", "aimodel=", cfg.aiModel, "\r\n")
         f:write("aiprompt=", (cfg.aiPrompt:gsub("[\r\n]+", " ")), "\r\n")
         f:close()
@@ -467,6 +468,7 @@ local function loadCfg()
             elseif k == "lite" then cfg.lite = (v == "1")
             elseif k == "devtag" then cfg.devtag = (v == "1")
             elseif k == "intro" then cfg.intro = (v == "1")
+            elseif k == "introdone" then cfg.introDone = (v == "1")
             elseif k == "autoupd" then cfg.autoupd = (v == "1")
             elseif k == "aiurl" then cfg.aiUrl = v
             elseif k == "aikey" then cfg.aiKey = v
@@ -2051,7 +2053,6 @@ local function setupGui()
     local autoBuf = imgui.new.bool(cfg.automp)
     local glassBuf = imgui.new.bool(cfg.glass)
     local liteBuf = imgui.new.bool(cfg.lite)
-    local introBuf = imgui.new.bool(cfg.intro)
     local tagBuf = imgui.new.bool(cfg.devtag)
     local updBuf = imgui.new.bool(cfg.autoupd)
     local applyStyle   -- определяется ниже
@@ -2520,10 +2521,12 @@ local function setupGui()
             post(saveCfg)
         end
         hint("Убирает блики и прозрачность окна - заметно меньше нагрузка на телефоне.")
-        if imgui.Checkbox(U("Анимация открытия окна"), introBuf) then
-            cfg.intro = introBuf[0] and true or false
+        if imgui.Button(U("Показать анимацию открытия снова") .. "##introagain", V2(fs * 16, fs * 2)) then
+            cfg.introDone = false
+            G.t0 = nil
             post(saveCfg)
         end
+        hint("Анимация показывается только при первом запуске.")
         if imgui.Checkbox(U("Метка «крутой разраб скрипта» у Filipp_Evans в чате"), tagBuf) then
             cfg.devtag = tagBuf[0] and true or false
             post(saveCfg)
@@ -2755,42 +2758,6 @@ local function setupGui()
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
-    -- всплывающее уведомление о загрузке (справа сверху)
-    local TOAST_T = 6
-    imgui.OnFrame(function()
-        if G.toastT0 and (os.clock() - G.toastT0 >= TOAST_T) then G.toastT0 = nil end
-        return G.toastT0 ~= nil and cfg.intro and not G.disabled and not G.initFailed and not G.noToast
-    end, function(self)
-        self.HideCursor = true
-        local age = os.clock() - G.toastT0
-        local slide = 1 - (1 - math.min(1, age / 0.5)) ^ 3
-        local fade = age > TOAST_T - 0.6 and math.max(0, (TOAST_T - age) / 0.6) or 1
-        local w = fs * 22
-        local flags = 0
-        pcall(function()
-            local F = imgui.WindowFlags
-            flags = F.NoTitleBar + F.NoResize + F.NoMove + F.NoInputs + F.NoScrollbar + F.AlwaysAutoResize
-        end)
-        imgui.SetNextWindowPos(V2(sw - (w + fs) * slide, fs * 3), imgui.Cond.Always)
-        imgui.SetNextWindowSize(V2(w, 0), imgui.Cond.Always)
-        local pushed = pcall(function() imgui.PushStyleVar(imgui.StyleVar.Alpha, fade) end)
-        local began = imgui.Begin("##fhtoast", nil, flags)
-        if began then
-            local ok, err = pcall(function()
-                local dl = imgui.GetWindowDrawList()
-                local p, sz = imgui.GetWindowPos(), imgui.GetWindowSize()
-                dl:AddRectFilled(p, V2(p.x + 5, p.y + sz.y), imgui.ColorConvertFloat4ToU32(ACC), 2)
-                bigText("FilippHelper загружен", ACC)
-                imgui.TextColored(GRAY, U("Автор: ByFilipp  ·  при участии Claude"))
-                imgui.TextColored(YEL, U("Меню: /fh   ·   команды: /fcmd"))
-                imgui.TextColored(GRAY, U("Поддержка: @ByFilipp123"))
-            end)
-            if not ok then G.noToast = true print("[FH] toast disabled: " .. tostring(err)) end
-        end
-        imgui.End()
-        if pushed then imgui.PopStyleVar() end
-    end)
-
     imgui.OnFrame(function()
         local on = G.show[0] and not G.disabled and not G.initFailed
         if not on then G.t0 = nil end
@@ -2803,7 +2770,7 @@ local function setupGui()
             drawGlass()
             if not G.t0 then G.t0 = os.clock() end
             local age = os.clock() - G.t0
-            if cfg.intro and not G.noIntro and age < INTRO_T then
+            if cfg.intro and not cfg.introDone and not G.noIntro and age < INTRO_T then
                 local okI, errI = pcall(drawIntro, age)
                 if not okI then
                     G.noIntro = true
@@ -2812,6 +2779,10 @@ local function setupGui()
                 local okC, clicked = pcall(imgui.IsMouseClicked, 0)
                 if okC and clicked then G.t0 = os.clock() - INTRO_T end
             else
+                if cfg.intro and not cfg.introDone then   -- первый показ закончился: больше не повторяем
+                    cfg.introDone = true
+                    post(saveCfg)
+                end
                 guarded(drawBody)
             end
         end
@@ -2820,7 +2791,6 @@ local function setupGui()
 
     function G.ready() return not G.disabled and not G.initFailed end
     function G.toggle() G.show[0] = not G.show[0] end
-    function G.notify() G.toastT0 = os.clock() end
     return G
 end
 
@@ -2939,7 +2909,6 @@ function main()
     fmsg("{FFD700}FilippHelper v" .. VERSION .. " {FFFFFF}- загружен")
     fmsg("{A9A9A9}Автор: {66CCFF}ByFilipp {A9A9A9}| при участии {66CCFF}Claude {A9A9A9}(Anthropic)")
     fmsg("{A9A9A9}Меню: {FFFF00}/fh {A9A9A9}| команды: {FFFF00}/fcmd {A9A9A9}| поддержка: {FFFF00}@ByFilipp123")
-    pcall(function() if guiState and guiState.ready() then guiState.notify() end end)
     if cfg.autoupd then
         lua_thread.create(function()
             wait(15000)   -- не мешаем загрузке игры
