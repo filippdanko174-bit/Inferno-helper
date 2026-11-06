@@ -17,7 +17,7 @@ local function toGame(s) return s end     -- строка скрипта -> игра
 local function fromGame(s) return s end   -- игра -> строка скрипта
 -- @ENC-END
 
-local VERSION = "1.1"
+local VERSION = "1.3"
 local UPDATE_FILE = "FilippHelper.lua"   -- какой файл скачивать с GitHub при обновлении
 local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
 local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
@@ -3077,8 +3077,74 @@ end
 ----------------------------------------------------------------------
 -- ЗАПУСК
 ----------------------------------------------------------------------
+-- Перенесённые команды модерации и обёртки (своя реализация)
+local function registerPorted(reg)
+    local scThread
+    local function tgt(p)
+        p = trim(p or "")
+        if p ~= "" then return p end
+        return watchedId
+    end
+    -- обёртки над серверными командами
+    reg("gt", function() safeSend("/ghetto") end)
+    reg("wh", function() safeSend("/warehouse") end)
+    reg("cb", function(p) if trim(p or "") ~= "" then safeSend("/warehouse " .. trim(p)) else fmsg("Укажите параметры: /cb [текст]") end end)
+    reg("gc", function(p) if trim(p or "") ~= "" then safeSend("/gzcolor " .. trim(p)) else fmsg("Укажите параметры: /gc [цвет]") end end)
+    reg("sprod", function(p)
+        local a, b = (p or ""):match("(%d+)%s+(%d+)")
+        if a then safeSend("/setbizprod " .. a .. " " .. b) else fmsg("Использование: /sprod [ID бизнеса] [число]") end
+    end)
+    reg("wn", function(p)
+        p = trim(p or "")
+        if p:match("^%d+%s+%S") then safeSend("/warn " .. p)
+        else fmsg("Использование: /wn [ID] [причина]") end
+    end)
+    -- команды с ID: вставляют команду в строку чата (как у Бруно, но ID по умолчанию из /re)
+    local function regId(cmd, sCmd, input)
+        reg(cmd, function(p)
+            local id = tgt(p)
+            if not id then fmsg("Укажите ID: /" .. cmd .. " ID (или сначала /re ID)") return end
+            if input then
+                if sampSetChatInputText then sampSetChatInputText("/" .. sCmd .. " " .. id .. " ") end
+                if sampSetChatInputEnabled then sampSetChatInputEnabled(true) end
+            else
+                safeSend("/" .. sCmd .. " " .. id)
+            end
+        end)
+    end
+    regId("jl", "jail", true) regId("mt", "mute", true)
+    regId("as", "getstats", false) regId("ci", "checkinv", false)
+    -- снятие и бан
+    local function regArg(cmd, sCmd)
+        reg(cmd, function(p)
+            p = trim(p or "")
+            if p ~= "" then safeSend("/" .. sCmd .. " " .. p) else fmsg("Использование: /" .. cmd .. " [ID или ник]") end
+        end)
+    end
+    regArg("uwn", "unwarn") regArg("ujl", "unjail") regArg("um", "unmute") regArg("bn", "ban") regArg("ubn", "unban")
+    -- таймер удаления и респавна транспорта
+    reg("sc", function()
+        if scThread then pcall(function() scThread:terminate() end) end
+        scThread = lua_thread.create(function()
+            safeSend("/a Внимание, через 15 секунд удаляю и респавню весь транспорт на сервере!")
+            wait(15000)
+            safeSend("/dvall") wait(1500)
+            safeSend("/spawncars")
+            scThread = nil
+        end)
+    end)
+    reg("scc", function()
+        if scThread then
+            pcall(function() scThread:terminate() end)
+            scThread = nil
+            fmsg("Таймер респавна транспорта остановлен.")
+        else fmsg("Таймер респавна транспорта не запущен.") end
+    end)
+end
+
 local function registerCommands(reg)
     registerExtra(reg)
+    registerPorted(reg)
     reg("fh", function()
         if guiState and guiState.ready() then guiState.toggle() else uiMenu() end
     end)

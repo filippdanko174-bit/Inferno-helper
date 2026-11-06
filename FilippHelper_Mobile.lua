@@ -46,7 +46,7 @@ end
 local function toGame(s) if enc8 then return enc8:decode(s) end return FB.toGame(s) end
 local function fromGame(s) if enc8 then return enc8:encode(s) end return FB.fromGame(s) end
 
-local VERSION = "1.1"
+local VERSION = "1.3"
 local UPDATE_FILE = "FilippHelper_Mobile.lua"   -- какой файл скачивать с GitHub при обновлении
 local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
 local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
