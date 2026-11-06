@@ -17,7 +17,7 @@ local function toGame(s) return s end     -- строка скрипта -> игра
 local function fromGame(s) return s end   -- игра -> строка скрипта
 -- @ENC-END
 
-local VERSION = "1.7"
+local VERSION = "1.8"
 local UPDATE_FILE = "FilippHelper.lua"   -- какой файл скачивать с GitHub при обновлении
 local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
 local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
@@ -40,7 +40,17 @@ end
 
 local function trim(s) return s:match("^%s*(.-)%s*$") end
 
+-- Причина наказания: если сервер показывает список причин, выбираем подходящую по нашему тексту
+local PUN = { pending = nil }
+function PUN.note(raw)
+    local kind, reason = tostring(raw or ""):match("^/(%a+)%s+%S+%s+(.+)$")
+    if kind == "mute" or kind == "jail" or kind == "warn" or kind == "ban" then
+        PUN.pending = { reason = reason, t = os.clock() }
+    end
+end
+
 local function safeSend(text)
+    PUN.note(text)
     text = toGame(tostring(text or "")):gsub("%c", " ")
     if text == "" then return end
     if #text > MAX_CHAT_LEN then text = text:sub(1, MAX_CHAT_LEN) end
@@ -596,7 +606,41 @@ function DEF.refresh()
     end)
 end
 
+-- подбирает пункт списка причин от сервера по словам из нашей причины
+function PUN.handle(id, style, text)
+    local p = PUN.pending
+    if not p then return false end
+    if os.clock() - p.t > 12 then PUN.pending = nil return false end
+    if style == 1 then
+        pcall(sampSendDialogResponse, id, 1, 0, toGame(p.reason))
+        PUN.pending = nil
+        return true
+    end
+    if style ~= 2 and style ~= 4 then return false end
+    local words = {}
+    for w in lower1251(p.reason):gmatch("[^%s%.,!%?%-%(%)%[%]:;\"']+") do
+        if #w >= 6 then words[#words + 1] = w end
+    end
+    if #words == 0 then return false end
+    local best, bestScore, idx = nil, 0, -1
+    local body = fromGame(tostring(text or "")):gsub("{%x%x%x%x%x%x}", "")
+    local i = 0
+    for line in (body .. "\n"):gmatch("([^\n]*)\n") do
+        local low = lower1251(line)
+        local score = 0
+        for _, w in ipairs(words) do if low:find(w, 1, true) then score = score + 1 end end
+        if score > bestScore then best, bestScore, idx = line, score, i end
+        i = i + 1
+    end
+    if not best then return false end
+    pcall(sampSendDialogResponse, id, 1, idx, "")
+    PUN.pending = nil
+    fmsg("Причина выбрана: " .. trim(best))
+    return true
+end
+
 function ev.onShowDialog(id, style, title, b1, b2, text)
+    if PUN.pending and PUN.handle(id, style, text) then return false end
     local ours = DEF.waiting and os.clock() - DEF.t0 < 6
     if ours or (DEF.user and os.clock() - DEF.user < 3) then
         DEF.user = nil
@@ -3155,6 +3199,7 @@ function ev.onServerMessage(color, text)
 end
 
 function ev.onSendCommand(command)
+    PUN.note(command)
     if type(command) ~= "string" then return end
     if command:match("^/define") then DEF.user = os.clock() end
     local id = command:match("^/re%s+(%d+)")
