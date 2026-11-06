@@ -411,12 +411,14 @@ end
 ----------------------------------------------------------------------
 -- НАСТРОЙКИ, ШАБЛОНЫ ОТВЕТОВ, АВТО-/mp
 ----------------------------------------------------------------------
+local LITE_DEFAULT = true    -- на телефоне по умолчанию лёгкий режим
 local cfg = {
     automp = true,                  -- после анонса МП вводить /mp и нажимать 1-ю строку
     accent = { 0.26, 0.62, 0.96 },  -- цвет акцента окна
     bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
     alpha = 0.97,                   -- прозрачность фона
     glass = true,                   -- стиль Liquid Glass (стекло)
+    lite = LITE_DEFAULT,            -- лёгкий режим: без бликов и прозрачности (меньше лагов)
     aiUrl = "https://api.openai.com/v1/chat/completions",
     aiKey = "",
     aiModel = "gpt-4o-mini",
@@ -442,7 +444,7 @@ local function saveCfg()
         f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
-        f:write("glass=", cfg.glass and "1" or "0", "\r\n")
+        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n")
         f:write("aiurl=", cfg.aiUrl, "\r\n", "aikey=", cfg.aiKey, "\r\n", "aimodel=", cfg.aiModel, "\r\n")
         f:write("aiprompt=", (cfg.aiPrompt:gsub("[\r\n]+", " ")), "\r\n")
         f:close()
@@ -458,6 +460,7 @@ local function loadCfg()
             local k, v = line:match("^(%w+)=(.+)$")
             if k == "automp" then cfg.automp = (v == "1")
             elseif k == "glass" then cfg.glass = (v == "1")
+            elseif k == "lite" then cfg.lite = (v == "1")
             elseif k == "aiurl" then cfg.aiUrl = v
             elseif k == "aikey" then cfg.aiKey = v
             elseif k == "aimodel" then cfg.aiModel = v
@@ -568,6 +571,159 @@ local function aiClean(text)
     return trim(text)
 end
 
+-- мини-JSON на случай, если в загрузчике нет encodeJson/decodeJson
+local function u8char(cp)
+    if cp < 0x80 then return string.char(cp)
+    elseif cp < 0x800 then return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64)
+    elseif cp < 0x10000 then return string.char(0xE0 + math.floor(cp / 4096), 0x80 + math.floor(cp / 64) % 64, 0x80 + cp % 64)
+    end
+    return string.char(0xF0 + math.floor(cp / 262144), 0x80 + math.floor(cp / 4096) % 64, 0x80 + math.floor(cp / 64) % 64, 0x80 + cp % 64)
+end
+
+local JSON_ESC = { ['"'] = '\\"', ["\\"] = "\\\\", ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" }
+
+function AI.jsonEncode(v)
+    local t = type(v)
+    if t == "string" then
+        return '"' .. (v:gsub('[%c"\\]', function(c) return JSON_ESC[c] or string.format("\\u%04x", c:byte()) end)) .. '"'
+    elseif t == "number" or t == "boolean" then return tostring(v)
+    elseif t == "table" then
+        local out = {}
+        if #v > 0 then
+            for i = 1, #v do out[i] = AI.jsonEncode(v[i]) end
+            return "[" .. table.concat(out, ",") .. "]"
+        end
+        for k, x in pairs(v) do out[#out + 1] = AI.jsonEncode(tostring(k)) .. ":" .. AI.jsonEncode(x) end
+        return "{" .. table.concat(out, ",") .. "}"
+    end
+    return "null"
+end
+
+function AI.jsonDecode(s)
+    local pos = 1
+    local function ws() pos = s:find("[^ \t\r\n]", pos) or (#s + 1) end
+    local val
+    local function str()
+        local out, i = {}, pos + 1
+        while true do
+            local j = s:find('["\\]', i)
+            if not j then error("bad json string") end
+            out[#out + 1] = s:sub(i, j - 1)
+            if s:sub(j, j) == '"' then pos = j + 1 return table.concat(out) end
+            local e = s:sub(j + 1, j + 1)
+            if e == "u" then
+                local cp = tonumber(s:sub(j + 2, j + 5), 16) or error("bad json escape")
+                i = j + 6
+                if cp >= 0xD800 and cp <= 0xDBFF and s:sub(i, i + 1) == "\\u" then
+                    local lo = tonumber(s:sub(i + 2, i + 5), 16)
+                    if lo and lo >= 0xDC00 and lo <= 0xDFFF then cp = 0x10000 + (cp - 0xD800) * 0x400 + (lo - 0xDC00) i = i + 6 end
+                end
+                out[#out + 1] = u8char(cp)
+            else
+                out[#out + 1] = ({ n = "\n", t = "\t", r = "\r", b = "\b", f = "\f" })[e] or e
+                i = j + 2
+            end
+        end
+    end
+    function val()
+        ws()
+        local c = s:sub(pos, pos)
+        if c == "{" then
+            local o = {}
+            pos = pos + 1 ws()
+            if s:sub(pos, pos) == "}" then pos = pos + 1 return o end
+            while true do
+                ws()
+                local k = str() ws()
+                if s:sub(pos, pos) ~= ":" then error("bad json object") end
+                pos = pos + 1
+                o[k] = val() ws()
+                local d = s:sub(pos, pos) pos = pos + 1
+                if d == "}" then return o elseif d ~= "," then error("bad json object") end
+            end
+        elseif c == "[" then
+            local a = {}
+            pos = pos + 1 ws()
+            if s:sub(pos, pos) == "]" then pos = pos + 1 return a end
+            while true do
+                a[#a + 1] = val() ws()
+                local d = s:sub(pos, pos) pos = pos + 1
+                if d == "]" then return a elseif d ~= "," then error("bad json array") end
+            end
+        elseif c == '"' then return str()
+        elseif s:sub(pos, pos + 3) == "true" then pos = pos + 4 return true
+        elseif s:sub(pos, pos + 4) == "false" then pos = pos + 5 return false
+        elseif s:sub(pos, pos + 3) == "null" then pos = pos + 4 return nil end
+        local num = s:match("^-?%d+%.?%d*[eE]?[+-]?%d*", pos)
+        if not num or num == "" then error("bad json value") end
+        pos = pos + #num
+        return tonumber(num)
+    end
+    return val()
+end
+
+-- отправка POST-запроса; вызывается из потока lua_thread. Возвращает код, текст или nil, ошибка.
+-- Перебираем способы: effil+requests (без подвисаний) -> requests -> ssl.https -> curl.
+function AI.http(url, key, body)
+    local okE, effil = pcall(require, "effil")
+    if okE and type(effil) == "table" and pcall(require, "requests") then
+        local runner = effil.thread(function(u, k, payload)
+            local requests = require "requests"
+            local okR, res = pcall(requests.request, "POST", u, {
+                headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. k },
+                data = payload,
+            })
+            if not okR then return 0, tostring(res) end
+            return res.status_code or 0, res.text or ""
+        end)
+        local h = runner(url, key, body)
+        local t0 = os.clock()
+        while true do
+            local st = h:status()
+            if st == "completed" then break end
+            if st == "failed" or st == "canceled" then return nil, "запрос не выполнен" end
+            if os.clock() - t0 > 40 then pcall(function() h:cancel() end) return nil, "таймаут ответа (40 с)" end
+            wait(100)
+        end
+        return h:get()
+    end
+    local headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. key }
+    local okR, requests = pcall(require, "requests")
+    if okR and type(requests) == "table" and requests.request then
+        local ok, res = pcall(requests.request, "POST", url, { headers = headers, data = body })
+        if ok and type(res) == "table" then return res.status_code or 0, res.text or "" end
+    end
+    local okS, https = pcall(require, "ssl.https")
+    local okL, ltn12 = pcall(require, "ltn12")
+    if okS and okL and type(https) == "table" and https.request then
+        local chunks = {}
+        headers["Content-Length"] = tostring(#body)
+        local ok, r1, code = pcall(https.request, {
+            url = url, method = "POST", headers = headers,
+            source = ltn12.source.string(body), sink = ltn12.sink.table(chunks),
+        })
+        if ok and r1 then return tonumber(code) or 0, table.concat(chunks) end
+    end
+    if io.popen and not url:find('[%c"\\%s]') and not key:find('[%c"\\%s]') then
+        local tmp = configDir() .. "/fh_ai_req.json"
+        local f = io.open(tmp, "wb")
+        if f then
+            f:write(body) f:close()
+            local okP, p = pcall(io.popen, string.format(
+                'curl -s -m 40 -w "\\n%%{http_code}" -X POST "%s" -H "Content-Type: application/json" -H "Authorization: Bearer %s" --data-binary @"%s"',
+                url, key, tmp))
+            if okP and p then
+                local out = p:read("*a") or "" p:close()
+                pcall(os.remove, tmp)
+                local text, code = out:match("^(.*)\n(%d+)%s*$")
+                if code then return tonumber(code), text end
+            end
+            pcall(os.remove, tmp)
+        end
+    end
+    return nil, "нет способа отправить запрос (нужны effil+requests, ssl.https или curl). Команда /aidiag покажет, что есть"
+end
+
 -- запрос в отдельном потоке; cb(ok, текст_или_ошибка) вызывается из этого потока
 function AI.ask(system, user, cb)
     if AI.busy then cb(false, "предыдущий запрос ещё идёт") return end
@@ -575,40 +731,20 @@ function AI.ask(system, user, cb)
     AI.busy = true
     lua_thread.create(function()
         local ok, a, b = pcall(function()
-            if not encodeJson or not decodeJson then return false, "в загрузчике нет encodeJson/decodeJson" end
-            local okE, effil = pcall(require, "effil")
-            if not okE then return false, "не найдена библиотека effil" end
-            if not pcall(require, "requests") then return false, "не найдена библиотека requests" end
-            local body = encodeJson({
+            local enc, dec = encodeJson or AI.jsonEncode, decodeJson or AI.jsonDecode
+            local body = enc({
                 model = toUi(cfg.aiModel), temperature = 0.3, max_tokens = 220,
                 messages = {
                     { role = "system", content = toUi(system) },
                     { role = "user", content = toUi(user) },
                 },
             })
-            local runner = effil.thread(function(url, key, payload)
-                local requests = require "requests"
-                local okR, res = pcall(requests.request, "POST", url, {
-                    headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. key },
-                    data = payload,
-                })
-                if not okR then return 0, tostring(res) end
-                return res.status_code or 0, res.text or ""
-            end)
             local url = trim(cfg.aiUrl):gsub("/+$", "")
             if url:match("/v1$") then url = url .. "/chat/completions" end   -- адрес вида .../v1 дополняем сами
-            local h = runner(url, trim(cfg.aiKey), body)
-            local t0 = os.clock()
-            while true do
-                local st = h:status()
-                if st == "completed" then break end
-                if st == "failed" or st == "canceled" then return false, "запрос не выполнен" end
-                if os.clock() - t0 > 40 then pcall(function() h:cancel() end) return false, "таймаут ответа (40 с)" end
-                wait(100)
-            end
-            local code, text = h:get()
+            local code, text = AI.http(url, trim(cfg.aiKey), body)
+            if not code then return false, text end
             if code == 0 then return false, "нет связи: " .. tostring(text):sub(1, 80) end
-            local okJ, data = pcall(decodeJson, text)
+            local okJ, data = pcall(dec, text)
             if not okJ or type(data) ~= "table" then return false, "ответ не JSON (код " .. tostring(code) .. ")" end
             if type(data.error) == "table" and data.error.message then return false, "API: " .. tostring(data.error.message):sub(1, 100) end
             local msg = data.choices and data.choices[1] and data.choices[1].message
@@ -620,6 +756,18 @@ function AI.ask(system, user, cb)
         if not ok then a, b = false, tostring(a) end
         pcall(cb, a, b)
     end)
+end
+
+-- /aidiag: что доступно в загрузчике для запросов к API
+function AI.diag()
+    local names = { "effil", "requests", "ssl.https", "ltn12", "socket", "copas", "cjson", "dkjson", "lib.requests" }
+    local have, miss = {}, {}
+    for _, n in ipairs(names) do
+        if pcall(require, n) then have[#have + 1] = n else miss[#miss + 1] = n end
+    end
+    fmsg("Есть: " .. (#have > 0 and table.concat(have, ", ") or "ничего"))
+    fmsg("Нет: " .. table.concat(miss, ", "))
+    fmsg("encodeJson: " .. (encodeJson and "да" or "нет (мини-JSON)") .. ", io.popen: " .. (io.popen and "да" or "нет"))
 end
 
 function AI.suggest(r, cb)
@@ -1530,6 +1678,7 @@ local function registerExtra(reg)
     reg("dvs", function() dvTimer(true) end)
     reg("ai", function(p) AI.cmdAsk(p) end)
     reg("aiset", function(p) AI.cmdSet(p) end)
+    reg("aidiag", function() AI.diag() end)
     reg("chkres", function() INFO.chkres() end)
     reg("chkend", function() INFO.chkend() end)
     reg("a1", function(p) if (p or "") == "" then INFO.a1() else INFO.a1args(p) end end)
@@ -1669,7 +1818,7 @@ local MENU_ROWS = {
     { "#", "Репорты" },
     { "/reports", "последние 15 репортов, быстрый ответ" },
     { "/rr [ID] текст", "ответить игроку через /pm" },
-    { "/ai [ID]  /aiset", "ИИ-подсказка ответа на репорт; настройка API (/aiset url|key|model|prompt)" },
+    { "/ai [ID]  /aiset  /aidiag", "ИИ-подсказка ответа на репорт; настройка API (/aiset url|key|model|prompt); /aidiag - что доступно для запросов" },
     { "/ar ID", "ответ + текст жалобы в /a" },
     { "/tpl  /rt [ID] N", "шаблоны ответов: список, отправка" },
     { "#", "Мероприятия и опросы" },
@@ -1776,6 +1925,7 @@ local function setupGui()
     local alphaBuf = imgui.new.float(cfg.alpha)
     local autoBuf = imgui.new.bool(cfg.automp)
     local glassBuf = imgui.new.bool(cfg.glass)
+    local liteBuf = imgui.new.bool(cfg.lite)
     local applyStyle   -- определяется ниже
 
     local function getBuf(b) return fromUi(ffi.string(b)) end
@@ -2201,6 +2351,12 @@ local function setupGui()
             post(saveCfg)
         end
         hint("Полупрозрачные панели и цветные блики. Прозрачность регулируется ползунком выше.")
+        if imgui.Checkbox(U("Лёгкий режим (если окно лагает)"), liteBuf) then
+            cfg.lite = liteBuf[0] and true or false
+            applyStyle()
+            post(saveCfg)
+        end
+        hint("Убирает блики и прозрачность окна - заметно меньше нагрузка на телефоне.")
         imgui.Spacing() imgui.Separator() imgui.Spacing()
         title("Мероприятия")
         if imgui.Checkbox(U("После анонса МП вводить /mp и нажимать 1-ю строку"), autoBuf) then
@@ -2316,7 +2472,7 @@ local function setupGui()
             -- Liquid Glass: полупрозрачные панели, светлые тонкие границы, большие скругления
             st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding, st.ScrollbarRounding = 22, 16, 12, 10, 12
             st.WindowBorderSize, st.ChildBorderSize, st.FrameBorderSize = 1, 1, 1
-            set("WindowBg", br, bg_, bb, cfg.alpha * 0.6)
+            set("WindowBg", br, bg_, bb, cfg.lite and 1 or cfg.alpha * 0.6)
             set("ChildBg", 1, 1, 1, 0.06)
             set("Border", 1, 1, 1, 0.28)
             set("Text", 0.96, 0.97, 1.0)
@@ -2330,7 +2486,7 @@ local function setupGui()
         else
             st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding, st.ScrollbarRounding = 10, 8, 6, 6, 8
             st.WindowBorderSize, st.ChildBorderSize, st.FrameBorderSize = 1, 1, 0
-            set("WindowBg", br, bg_, bb, cfg.alpha)
+            set("WindowBg", br, bg_, bb, cfg.lite and 1 or cfg.alpha)
             set("ChildBg", lift(br, 0.03), lift(bg_, 0.03), lift(bb, 0.04))
             set("Border", lift(br, 0.13), lift(bg_, 0.14), lift(bb, 0.18)) set("Text", 0.92, 0.93, 0.95)
             set("FrameBg", lift(br, 0.07), lift(bg_, 0.08), lift(bb, 0.10))
@@ -2346,7 +2502,7 @@ local function setupGui()
 
     -- декор стекла: мягкие цветные блики за панелями и световая полоса сверху
     local function drawGlass()
-        if not cfg.glass or G.noDeco then return end
+        if not cfg.glass or cfg.lite or G.noDeco then return end
         local ok, err = pcall(function()
             local dl = imgui.GetWindowDrawList()
             local p, sz = imgui.GetWindowPos(), imgui.GetWindowSize()
