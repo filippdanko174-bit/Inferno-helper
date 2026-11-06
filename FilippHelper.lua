@@ -612,9 +612,10 @@ function PUN.handle(id, style, text)
     if not p then return false end
     if os.clock() - p.t > 12 then PUN.pending = nil return false end
     if style == 1 then
-        pcall(sampSendDialogResponse, id, 1, 0, toGame(p.reason))
+        local reasonG = toGame(p.reason)
         PUN.pending = nil
-        return true
+        lua_thread.create(function() wait(150) pcall(sampSendDialogResponse, id, 1, 0, reasonG) end)
+        return false
     end
     if style ~= 2 and style ~= 4 then return false end
     local words = {}
@@ -633,8 +634,8 @@ function PUN.handle(id, style, text)
         i = i + 1
     end
     if not best then return false end
-    pcall(sampSendDialogResponse, id, 1, idx, "")
     PUN.pending = nil
+    lua_thread.create(function() wait(150) pcall(sampSendDialogResponse, id, 1, idx, "") end)
     fmsg("Причина выбрана: " .. trim(best))
     return true
 end
@@ -2213,9 +2214,9 @@ local function setupGui()
     end
     -- крупный текст (второй шрифт, если удалось загрузить)
     local function bigText(s, color)
-        local pushed = G.big and pcall(imgui.PushFont, G.big)
+        pcall(imgui.SetWindowFontScale, 1.45)
         imgui.TextColored(color or ACC, U(s))
-        if pushed then imgui.PopFont() end
+        pcall(imgui.SetWindowFontScale, 1)
     end
     local function title(s, sub)
         bigText(s, ACC)
@@ -2949,11 +2950,11 @@ local function setupGui()
         dl:AddCircleFilled(V2(cx, cy), fs * 0.7 * ease, col(1, 1, 1, a), 24)
         dl:AddCircle(V2(cx, cy), R * 1.12, col(ar, ag, ab, a * 0.35), 48, 2)
         local function centered(str, y, c, big)
-            local pushed = big and G.big and pcall(imgui.PushFont, G.big)
+            if big then pcall(imgui.SetWindowFontScale, 1.45) end
             local w = imgui.CalcTextSize(U(str)).x
             imgui.SetCursorPos(V2((sz.x - w) / 2, y))
             imgui.TextColored(c, U(str))
-            if pushed then imgui.PopFont() end
+            if big then pcall(imgui.SetWindowFontScale, 1) end
         end
         local full = "FilippHelper"
         local n = math.max(0, math.min(#full, math.floor((age - 0.35) / 0.08)))
@@ -2971,7 +2972,7 @@ local function setupGui()
         local ok, err = pcall(function()
             local io = imgui.GetIO()
             io.Fonts:AddFontFromFileTTF(fontPath, fs, nil, io.Fonts:GetGlyphRangesCyrillic())
-            pcall(function() G.big = io.Fonts:AddFontFromFileTTF(fontPath, math.floor(fs * 1.45), nil, io.Fonts:GetGlyphRangesCyrillic()) end)
+            -- второй (большой) шрифт не создаём: лишний атлас шрифтов ронял игру на слабых ПК; крупный текст делаем масштабом
             applyStyle()
         end)
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
@@ -3353,6 +3354,15 @@ function main()
     local okB, errB = pcall(setupBinder, builtin, guardedReg)
     if not okB then print("[FH] binder setup error: " .. tostring(errB)) end
 
+    -- всё, что трогает чат и SAMP, - только когда игра подключена к серверу
+    if sampGetGamestate then
+        while true do
+            local okG, gs = pcall(sampGetGamestate)
+            if not okG or gs == 3 then break end
+            wait(250)
+        end
+    end
+    wait(1500)
     fmsg("{FFD700}FilippHelper v" .. VERSION .. " {FFFFFF}- загружен")
     fmsg("{A9A9A9}Автор и разработчик: {66CCFF}ByFilipp {A9A9A9}| при участии {66CCFF}Claude {A9A9A9}(Anthropic)")
     fmsg("{A9A9A9}Раздачи, репорты, мероприятия, проверка активности, транспорт, биндер и ИИ-ответы - в одном окне")
