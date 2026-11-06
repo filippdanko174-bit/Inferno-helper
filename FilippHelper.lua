@@ -17,7 +17,7 @@ local function toGame(s) return s end     -- строка скрипта -> игра
 local function fromGame(s) return s end   -- игра -> строка скрипта
 -- @ENC-END
 
-local VERSION = "1.3"
+local VERSION = "1.4"
 local UPDATE_FILE = "FilippHelper.lua"   -- какой файл скачивать с GitHub при обновлении
 local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
 local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
@@ -2126,7 +2126,7 @@ local function setupGui()
     local B = {
         gwWord = buf(64), gwPrize = buf(96), reply = buf(512), evId = buf(12),
         bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160), claim = buf(64), evPrize = buf(96), chkWord = buf(24), chkSecs = buf(8), search = buf(48),
-        aiUrl = buf(200), aiKey = buf(200), aiModel = buf(64), aiPrompt = buf(700),
+        aiUrl = buf(200), aiKey = buf(200), aiModel = buf(64), aiPrompt = buf(700), aiChat = buf(600),
     }
     local accBuf = imgui.new.float[3](cfg.accent[1], cfg.accent[2], cfg.accent[3])
     local bgBuf = imgui.new.float[3](cfg.bg[1], cfg.bg[2], cfg.bg[3])
@@ -2438,6 +2438,31 @@ local function setupGui()
         imgui.EndChild()
     end }
 
+    pages[14] = { "ИИ", function()
+        title("ИИ-помощник")
+        hint("Спросите что угодно: правила, формулировки, ответ игроку. Ответ появится ниже.")
+        imgui.InputTextMultiline("##aichat", B.aiChat, 600, V2(-1, fs * 4))
+        local bw = V2(fs * 11, fs * 2)
+        if primary("Спросить##aiask", bw) then
+            local q = trim(getBuf(B.aiChat))
+            if q == "" then G.aiMsg = "Напишите вопрос."
+            elseif not AI.ready() then G.aiMsg = "Сначала заполните адрес и ключ API в Настройках."
+            else
+                G.aiMsg = "Думаю..."
+                post(function()
+                    AI.ask("Ты помощник администратора SA-MP сервера. Отвечай кратко, по-русски.", q, function(ok, text)
+                        G.aiMsg = ok and tostring(text) or ("Ошибка: " .. tostring(text))
+                    end)
+                end)
+            end
+        end
+        imgui.SameLine()
+        if imgui.Button(U("Очистить") .. "##aiclr", bw) then ffi.copy(B.aiChat, "") G.aiMsg = nil end
+        imgui.BeginChild("##aians", V2(0, fs * 8), true)
+        imgui.TextWrapped(U(G.aiMsg or "Ответ появится здесь."))
+        imgui.EndChild()
+    end }
+
     pages[11] = { "Памятки", function()
         title("Объявления и памятки")
         local bw = V2(fs * 14, fs * 2)
@@ -2692,7 +2717,7 @@ local function setupGui()
             local groups = {
                 { "ГЛАВНОЕ", { "Главная", "Проверка", "Репорты", "Раздачи", "Мероприятия" } },
                 { "АДМИНИСТРИРОВАНИЕ", { "Фракции", "Транспорт", "Памятки", "Занять" } },
-                { "ИНСТРУМЕНТЫ", { "Биндер", "Шпаргалки", "Команды" } },
+                { "ИНСТРУМЕНТЫ", { "Биндер", "Шпаргалки", "Команды", "ИИ" } },
             }
             local byName, used = {}, {}
             for i, p in ipairs(pages) do byName[p[1]] = i end
