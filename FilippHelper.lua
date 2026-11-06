@@ -17,7 +17,7 @@ local function toGame(s) return s end     -- строка скрипта -> игра
 local function fromGame(s) return s end   -- игра -> строка скрипта
 -- @ENC-END
 
-local VERSION = "1.5"
+local VERSION = "1.6"
 local UPDATE_FILE = "FilippHelper.lua"   -- какой файл скачивать с GitHub при обновлении
 local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
 local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
@@ -2126,7 +2126,7 @@ local function setupGui()
     local B = {
         gwWord = buf(64), gwPrize = buf(96), reply = buf(512), evId = buf(12),
         bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160), claim = buf(64), evPrize = buf(96), chkWord = buf(24), chkSecs = buf(8), search = buf(48),
-        aiUrl = buf(200), aiKey = buf(200), aiModel = buf(64), aiPrompt = buf(700), aiChat = buf(600),
+        aiUrl = buf(200), aiKey = buf(200), aiModel = buf(64), aiPrompt = buf(700), aiChat = buf(600), modId = buf(48), modTxt = buf(160),
     }
     local accBuf = imgui.new.float[3](cfg.accent[1], cfg.accent[2], cfg.accent[3])
     local bgBuf = imgui.new.float[3](cfg.bg[1], cfg.bg[2], cfg.bg[3])
@@ -2463,6 +2463,52 @@ local function setupGui()
         imgui.EndChild()
     end }
 
+    pages[15] = { "Модерация", function()
+        title("Модерация")
+        hint("Укажите ID или ник и текст (причину). Кнопки отправляют команду сразу, как при вводе в чат.")
+        imgui.Text(U("ID / ник")) imgui.SameLine()
+        imgui.PushItemWidth(fs * 12) imgui.InputText("##modid", B.modId, 48) imgui.PopItemWidth()
+        imgui.SameLine() imgui.Text(U("Текст")) imgui.SameLine()
+        imgui.PushItemWidth(-1) imgui.InputText("##modtxt", B.modTxt, 160) imgui.PopItemWidth()
+        local mid, mtx = trim(getBuf(B.modId)), trim(getBuf(B.modTxt))
+        local bw = V2(fs * 9, fs * 2)
+        local ACT = {
+            { "Гетто", "/ghetto", false },
+            { "Склад", "/warehouse", false },
+            { "Цвет банды", "/gzcolor", "text" },
+            { "Варн", "/warn", "idtext" },
+            { "Анварн", "/unwarn", "id" },
+            { "Мут", "/mute", "idtext" },
+            { "Размут", "/unmute", "id" },
+            { "Джайл", "/jail", "idtext" },
+            { "Из джайла", "/unjail", "id" },
+            { "Бан", "/ban", "idtext" },
+            { "Разбан", "/unban", "id" },
+            { "Статистика", "/getstats", "id" },
+            { "Инвентарь", "/checkinv", "id" },
+        }
+        for i, a in ipairs(ACT) do
+            if imgui.Button(U(a[1]) .. "##mod" .. i, bw) then
+                local need = a[3]
+                if (need == "id" or need == "idtext") and mid == "" then
+                    G.modMsg = "Укажите ID или ник."
+                elseif (need == "text" or need == "idtext") and mtx == "" then
+                    G.modMsg = "Заполните поле «Текст»."
+                else
+                    local parts = { a[2] }
+                    if need == "id" or need == "idtext" then parts[#parts + 1] = mid end
+                    if need == "text" or need == "idtext" then parts[#parts + 1] = mtx end
+                    local line = table.concat(parts, " ")
+                    G.modMsg = "Отправлено: " .. line
+                    post(function() safeSend(line) end)
+                end
+            end
+            if i % 4 ~= 0 and i < #ACT then imgui.SameLine() end
+        end
+        imgui.Spacing()
+        if G.modMsg then imgui.TextColored(GRAY, U(G.modMsg)) end
+    end }
+
     pages[11] = { "Памятки", function()
         title("Объявления и памятки")
         local bw = V2(fs * 14, fs * 2)
@@ -2717,6 +2763,7 @@ local function setupGui()
             local groups = {
                 { "ГЛАВНОЕ", { "Главная", "Репорты", "Проверка", "Мероприятия", "Раздачи" } },
                 { "АДМИНИСТРИРОВАНИЕ", { "Занять", "Фракции", "Транспорт", "Памятки" } },
+                { "МОДЕРАЦИЯ", { "Модерация" } },
                 { "ИНСТРУМЕНТЫ", { "ИИ", "Биндер", "Шпаргалки", "Команды" } },
             }
             local byName, used = {}, {}
