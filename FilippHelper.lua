@@ -17,7 +17,7 @@ local function toGame(s) return s end     -- строка скрипта -> игра
 local function fromGame(s) return s end   -- игра -> строка скрипта
 -- @ENC-END
 
-local VERSION = "1.2"
+local VERSION = "1.1"
 local UPDATE_FILE = "FilippHelper.lua"   -- какой файл скачивать с GitHub при обновлении
 local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
 local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
