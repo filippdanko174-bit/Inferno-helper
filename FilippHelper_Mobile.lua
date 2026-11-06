@@ -46,7 +46,7 @@ end
 local function toGame(s) if enc8 then return enc8:decode(s) end return FB.toGame(s) end
 local function fromGame(s) if enc8 then return enc8:encode(s) end return FB.fromGame(s) end
 
-local VERSION = "1.1"
+local VERSION = "1.2"
 local UPDATE_FILE = "FilippHelper_Mobile.lua"   -- какой файл скачивать с GitHub при обновлении
 local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
 local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
@@ -449,7 +449,7 @@ local cfg = {
     bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
     alpha = 0.97,                   -- прозрачность фона
     glass = true,                   -- стиль Liquid Glass (стекло)
-    devtag = true,                  -- метка «крутой разраб скрипта» у ника Filipp_Evans
+    tagmode = 0,                    -- метка над игроком: 0 - imgui, 1 - render (запасной)
     autoupd = true,                 -- проверять обновления при запуске
     reptoast = true,                -- овальное уведомление о репорте
     intro = true,                   -- анимация открытия окна (только при первом запуске)
@@ -480,7 +480,7 @@ local function saveCfg()
         f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
-        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "devtag=", cfg.devtag and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "reptoast=", cfg.reptoast and "1" or "0", "\r\n", "introdone=", cfg.introDone and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
+        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "tagmode=", tostring(cfg.tagmode), "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "reptoast=", cfg.reptoast and "1" or "0", "\r\n", "introdone=", cfg.introDone and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
         f:write("aiurl=", cfg.aiUrl, "\r\n", "aikey=", cfg.aiKey, "\r\n", "aimodel=", cfg.aiModel, "\r\n")
         f:write("aiprompt=", (cfg.aiPrompt:gsub("[\r\n]+", " ")), "\r\n")
         f:close()
@@ -497,7 +497,7 @@ local function loadCfg()
             if k == "automp" then cfg.automp = (v == "1")
             elseif k == "glass" then cfg.glass = (v == "1")
             elseif k == "lite" then cfg.lite = (v == "1")
-            elseif k == "devtag" then cfg.devtag = (v == "1")
+            elseif k == "tagmode" then cfg.tagmode = (tonumber(v) == 1) and 1 or 0
             elseif k == "intro" then cfg.intro = (v == "1")
             elseif k == "reptoast" then cfg.reptoast = (v == "1")
             elseif k == "introdone" then cfg.introDone = (v == "1")
@@ -572,7 +572,68 @@ local function armAutoMp(force)
     safeSend("/mp")
 end
 
+----------------------------------------------------------------------
+-- СПИСОК РЕПОРТОВ ИЗ /define
+-- /rpl (или кнопка в /fh) шлёт /define, перехватывает диалог со списком,
+-- разбирает его и заменяет им список репортов. Сам диалог не показывается.
+-- Сырой текст диалога сохраняется в config/FilippHelper_define.txt.
+----------------------------------------------------------------------
+local DEF = { waiting = false, t0 = 0, user = nil, token = 0 }
+
+local function defineParse(text)
+    local list = {}
+    for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+        line = line:gsub("{%x%x%x%x%x%x}", ""):gsub("[\t\r]", " ")
+        local name, id, body = line:match("([A-Za-z][A-Za-z0-9_%.]*)%[(%d+)%]%s*[:%-%)]*%s*(.*)")
+        if not name then name, id, body = line:match("([A-Za-z][A-Za-z0-9_%.]*)%s*%((%d+)%)%s*[:%-]*%s*(.*)") end
+        if name and #list < MAX_REPORTS then list[#list + 1] = { name = name, id = id, text = trim(body or "") } end
+    end
+    return list
+end
+
+-- вызывается из onShowDialog; ours - диалог вызван нашим запросом (его прячем)
+function DEF.onDialog(id, title, text, ours)
+    DEF.waiting = false
+    pcall(function()
+        local f = io.open(configDir() .. "/FilippHelper_define.txt", "wb")
+        if f then f:write(tostring(title or ""), "\n", tostring(text or "")) f:close() end
+    end)
+    local list = defineParse(fromGame(tostring(text or "")))
+    if #list == 0 then
+        fmsg("Не удалось разобрать /define. Формат записан в config/FilippHelper_define.txt - пришлите этот файл разработчику.")
+    else
+        for i = #reports, 1, -1 do reports[i] = nil end
+        for _, r in ipairs(list) do reports[#reports + 1] = r end
+        fmsg("Список репортов обновлён из /define: " .. #list .. ".")
+    end
+    if ours then
+        lua_thread.create(function() wait(100) pcall(sampSendDialogResponse, id, 0, -1, "") end)
+        return false
+    end
+end
+
+function DEF.refresh()
+    if DEF.waiting then return end
+    DEF.waiting, DEF.t0 = true, os.clock()
+    DEF.token = DEF.token + 1
+    local my = DEF.token
+    safeSend("/define")
+    lua_thread.create(function()
+        wait(5000)
+        if DEF.waiting and DEF.token == my then
+            DEF.waiting = false
+            fmsg("/define не ответил (нет доступа или другой формат).")
+        end
+    end)
+end
+
 function ev.onShowDialog(id, style, title, b1, b2, text)
+    local ours = DEF.waiting and os.clock() - DEF.t0 < 6
+    if ours or (DEF.user and os.clock() - DEF.user < 3) then
+        DEF.user = nil
+        local okD, res = pcall(DEF.onDialog, id, title, text, ours)
+        if okD and res == false then return false end
+    end
     if not autoMp.armed then return end
     if os.clock() - autoMp.t0 > 6 then autoMp.armed = false return end
     if style ~= 2 and style ~= 4 and style ~= 5 then return end   -- только списки
@@ -1841,6 +1902,8 @@ local function registerExtra(reg)
         local g = guiState and guiState.diag()
         fmsg("Кодировка: " .. (enc8 and "библиотека encoding" or "запасная (encoding не найдена)"))
         fmsg("Окно /fh: " .. (g and (g.disabled and "отключено из-за ошибок" or g.init and "не запустилось" or "готово") or "недоступно (нет mimgui)"))
+        local ti = guiState and guiState.tagInfo()
+        fmsg("Метка над игроком: " .. (ti and ((ti.off and ("ошибка: " .. tostring(ti.err))) or ("способ " .. (ti.mode == 0 and "imgui" or "render") .. (ti.id and (", игрок найден (ID " .. ti.id .. ")") or ", игрок не найден"))) or "недоступна"))
         fmsg("Уведомление о репорте: " .. (not cfg.reptoast and "выключено в настройках" or (g and g.off) and ("сломалось: " .. tostring(g.err)) or "включено") ..
             ". Репортов получено: " .. #reports)
     end)
@@ -1989,6 +2052,8 @@ local MENU_ROWS = {
     { "/gwstop", "отменить раздачу" },
     { "#", "Репорты" },
     { "/reports", "последние 15 репортов, быстрый ответ" },
+    { "/rpl", "обновить список репортов из /define" },
+    { "/tagmode", "переключить способ рисования метки над игроком (если не видна)" },
     { "/rr [ID] текст", "ответить игроку через /pm" },
     { "/reptest  /fhdiag", "проверка овального уведомления о репорте; диагностика кодировки и окна" },
     { "/fhupd [install]", "проверка обновлений на GitHub; install - скачать и установить" },
@@ -2100,7 +2165,6 @@ local function setupGui()
     local autoBuf = imgui.new.bool(cfg.automp)
     local glassBuf = imgui.new.bool(cfg.glass)
     local liteBuf = imgui.new.bool(cfg.lite)
-    local tagBuf = imgui.new.bool(cfg.devtag)
     local updBuf = imgui.new.bool(cfg.autoupd)
     local repBuf = imgui.new.bool(cfg.reptoast)
     local applyStyle   -- определяется ниже
@@ -2125,10 +2189,13 @@ local function setupGui()
     local function clearBuf(b) ffi.fill(b, ffi.sizeof(b), 0) end
     local sel = { report = 0, fraction = 0, bind = "", note = 0, roles = {} }
 
-    local ucache = {}
+    local ucache, ucount = {}, 0
     local function U(s)
         local c = ucache[s]
-        if not c then c = toUi(s) ucache[s] = c end
+        if not c then
+            if ucount > 600 then ucache, ucount = {}, 0 end   -- не даём кэшу расти бесконечно
+            c = toUi(s) ucache[s] = c ucount = ucount + 1
+        end
         return c
     end
     -- крупный текст (второй шрифт, если удалось загрузить)
@@ -2166,7 +2233,7 @@ local function setupGui()
             if r[1] == "#" then
                 head = r[2]
                 if q == "" then imgui.Spacing() imgui.TextColored(ACC, U(r[2])) head = nil end
-            elseif q == "" or lower1251(r[1]):find(q, 1, true) or lower1251(r[2]):find(q, 1, true) then
+            elseif q == "" or (r.l or (function() r.l = lower1251(r[1] .. " " .. r[2]) return r.l end)()):find(q, 1, true) then
                 if head then imgui.Spacing() imgui.TextColored(ACC, U(head)) head = nil end
                 imgui.TextColored(YEL, U(r[1])) imgui.SameLine(fs * 15) imgui.TextWrapped(U(r[2]))
             end
@@ -2201,6 +2268,8 @@ local function setupGui()
 
     pages[3] = { "Репорты", function()
         title("Последние репорты")
+        if imgui.Button(U("Обновить из /define") .. "##rpl", V2(fs * 12, fs * 1.8)) then post(function() DEF.refresh() end) end
+        imgui.SameLine() hint("Список берётся из команды /define (диалог не показывается).")
         if #reports == 0 then
             hint("Репортов пока нет.")
         else
@@ -2374,8 +2443,10 @@ local function setupGui()
         local secs = tonumber(getBuf(B.chkSecs)) or 0
         imgui.Spacing()
         imgui.TextColored(YEL, U("Что уйдёт в /a:"))
-        local lines = chkLines(selNames(), word, secs)
-        for _, l in ipairs(lines) do imgui.TextWrapped(U(l)) end
+        local names = selNames()
+        local key = table.concat(names, "|") .. "#" .. word .. "#" .. secs
+        if G.chkKey ~= key then G.chkKey, G.chkPreview = key, (chkLines(names, word, secs)) end
+        for _, l in ipairs(G.chkPreview) do imgui.TextWrapped(U(l)) end
         imgui.Spacing()
         local bw = V2(fs * 11, fs * 2.2)
         if primary("Начать проверку##chkgo", bw) then
@@ -2575,11 +2646,6 @@ local function setupGui()
             post(saveCfg)
         end
         hint("Анимация показывается только при первом запуске.")
-        if imgui.Checkbox(U("Метка «Крутой разраб скрипта» над игроком Filipp_Evans"), tagBuf) then
-            cfg.devtag = tagBuf[0] and true or false
-            post(saveCfg)
-        end
-        hint("Рисуется над головой игрока у всех, у кого установлен скрипт.")
         if imgui.Checkbox(U("Овальное уведомление о новом репорте (внизу экрана)"), repBuf) then
             cfg.reptoast = repBuf[0] and true or false
             post(saveCfg)
@@ -2810,57 +2876,89 @@ local function setupGui()
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
-    -- метка «крутой разраб скрипта» над головой игрока Filipp_Evans (видна всем, у кого стоит скрипт)
+    -- метка «крутой разраб скрипта» над головой игрока Filipp_Evans (всегда включена,
+    -- видна всем, у кого стоит скрипт). Рисуется через imgui; запасной способ - render-функции MoonLoader (/tagmode).
     local DEV_NICK, DEV_TEXT = "Filipp_Evans", "Крутой разраб скрипта"
-    local devState = { id = nil, t = 0 }
-    imgui.OnFrame(function() return cfg.devtag and not G.noTag and not G.disabled and not G.initFailed end, function(self)
-        self.HideCursor = true
-        local ok, err = pcall(function()
-            local now = os.clock()
-            local okMe, myId = sampGetPlayerIdByCharHandle(PLAYER_PED)
-            if now - devState.t > 2 then          -- раз в 2 секунды ищем нужного игрока
-                devState.t, devState.id = now, nil
-                if okMe and sampGetPlayerNickname(myId) == DEV_NICK then devState.id = myId
-                else
-                    for id = 0, sampGetMaxPlayerId(false) do
-                        if sampIsPlayerConnected(id) and sampGetPlayerNickname(id) == DEV_NICK then devState.id = id break end
-                    end
+    local devState = { id = nil, t = -10 }
+    local function devScreenPos()
+        local now = os.clock()
+        local okMe, myId = sampGetPlayerIdByCharHandle(PLAYER_PED)
+        if now - devState.t > 2 then          -- раз в 2 секунды ищем нужного игрока
+            devState.t, devState.id = now, nil
+            if okMe and sampGetPlayerNickname(myId) == DEV_NICK then devState.id = myId
+            else
+                for id = 0, sampGetMaxPlayerId(false) do
+                    if sampIsPlayerConnected(id) and sampGetPlayerNickname(id) == DEV_NICK then devState.id = id break end
                 end
             end
-            local id = devState.id
-            if not id then return end
-            local ped = PLAYER_PED
-            if not (okMe and id == myId) then
-                local okP, h = sampGetCharHandleBySampPlayerId(id)
-                if not okP then return end
-                ped = h
-            end
-            if not doesCharExist(ped) then return end
-            local x, y, z = getCharCoordinates(ped)
-            local px, py, pz = getCharCoordinates(PLAYER_PED)
-            local dx, dy, dz = x - px, y - py, z - pz
-            if dx * dx + dy * dy + dz * dz > 70 * 70 then return end
-            if isPointOnScreen and not isPointOnScreen(x, y, z + 1.4, 1) then return end
-            local sx, sy = convert3DCoordsToScreen(x, y, z + 1.45)
-            if not sx or sx < 0 or sy < 0 or sx > sw or sy > sh then return end
-            local dl = imgui.GetBackgroundDrawList()
+        end
+        local id = devState.id
+        if not id then return end
+        local ped = PLAYER_PED
+        if not (okMe and id == myId) then
+            local okP, h = sampGetCharHandleBySampPlayerId(id)
+            if not okP then return end
+            ped = h
+        end
+        if not doesCharExist(ped) then return end
+        local x, y, z = getCharCoordinates(ped)
+        local px, py, pz = getCharCoordinates(PLAYER_PED)
+        local dx, dy, dz = x - px, y - py, z - pz
+        if dx * dx + dy * dy + dz * dz > 70 * 70 then return end
+        if isPointOnScreen and not isPointOnScreen(x, y, z + 1.4, 1) then return end
+        local sx, sy = convert3DCoordsToScreen(x, y, z + 1.45)
+        if not sx or sx < 0 or sy < 0 or sx > sw or sy > sh then return end
+        return sx, sy
+    end
+
+    imgui.OnFrame(function() return cfg.tagmode == 0 and not G.noTag and not G.disabled and not G.initFailed end, function(self)
+        self.HideCursor = true
+        local ok, err = pcall(function()
+            local sx, sy = devScreenPos()
+            if not sx then return end
+            local dl = (imgui.GetBackgroundDrawList or imgui.GetForegroundDrawList)()
             local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
             local txt = U(DEV_TEXT)
             local w = imgui.CalcTextSize(txt).x
             local padX, padY = fs * 0.7, fs * 0.25
             local x0, y0 = sx - w / 2 - padX, sy - fs * 1.4 - padY
-            local pulse = 0.85 + 0.15 * math.sin(now * 3)
-            dl:AddRectFilled(V2(x0, y0), V2(x0 + w + padX * 2, y0 + fs * 1.1 + padY * 2),
-                imgui.ColorConvertFloat4ToU32(imgui.ImVec4(ar * 0.25, ag * 0.25, ab * 0.25, 0.85)), fs * 0.9)
-            dl:AddRect(V2(x0, y0), V2(x0 + w + padX * 2, y0 + fs * 1.1 + padY * 2),
-                imgui.ColorConvertFloat4ToU32(imgui.ImVec4(1, 0.84, 0, pulse)), fs * 0.9, 15, 2)
-            dl:AddText(V2(x0 + padX, y0 + padY), imgui.ColorConvertFloat4ToU32(imgui.ImVec4(1, 0.84, 0, 1)), txt)
+            local x1, y1 = x0 + w + padX * 2, y0 + fs * 1.1 + padY * 2
+            local gold = imgui.ColorConvertFloat4ToU32(imgui.ImVec4(1, 0.84, 0, 1))
+            dl:AddRectFilled(V2(x0, y0), V2(x1, y1), imgui.ColorConvertFloat4ToU32(imgui.ImVec4(ar * 0.25, ag * 0.25, ab * 0.25, 0.85)), fs * 0.9)
+            dl:AddRect(V2(x0, y0), V2(x1, y1), gold, fs * 0.9)
+            dl:AddText(V2(x0 + padX, y0 + padY), gold, txt)
         end)
         if not ok then
-            G.noTag = true
+            G.noTag, G.tagErr = true, tostring(err)
             print("[FH] dev tag disabled: " .. tostring(err))
+            fmsg("Метка над игроком: ошибка рисования (" .. tostring(err):sub(1, 80) .. "). Включён запасной способ.")
+            cfg.tagmode = 1
         end
     end)
+
+    -- запасной способ: render-функции MoonLoader (если есть), рисует независимо от imgui
+    if renderCreateFont and renderFontDrawText then
+        lua_thread.create(function()
+            local font = renderCreateFont("Arial", 10, 5)
+            local text = toGame(DEV_TEXT)
+            while true do
+                if cfg.tagmode == 1 then
+                    wait(0)
+                    local ok, sx, sy = pcall(devScreenPos)
+                    if ok and sx then
+                        pcall(function()
+                            local w = renderGetFontDrawTextLength(font, text)
+                            renderFontDrawText(font, text, sx - w / 2, sy - 24, 0xFFFFD700)
+                        end)
+                    end
+                else
+                    wait(300)
+                end
+            end
+        end)
+    end
+
+    function G.tagInfo() return { id = devState.id, mode = cfg.tagmode, off = G.noTag, err = G.tagErr } end
 
     -- овальное уведомление о новом репорте (низ экрана по центру, цвет от акцента /fh)
     local REP_T = 6
@@ -3001,6 +3099,7 @@ end
 
 function ev.onSendCommand(command)
     if type(command) ~= "string" then return end
+    if command:match("^/define") then DEF.user = os.clock() end
     local id = command:match("^/re%s+(%d+)")
     if id then watchedId = id
     elseif command:match("^/re%s+off") or command:match("^/reoff") then watchedId = nil end
@@ -3015,6 +3114,12 @@ local function registerCommands(reg)
         if guiState and guiState.ready() then guiState.toggle() else uiMenu() end
     end)
     reg("reports", uiReports)
+    reg("rpl", function() DEF.refresh() end)
+    reg("tagmode", function()
+        cfg.tagmode = (cfg.tagmode == 0) and 1 or 0
+        saveCfg()
+        fmsg("Метка над игроком: способ " .. (cfg.tagmode == 0 and "imgui (основной)" or "render (запасной)") .. ".")
+    end)
     reg("fcmd", uiMenu)
     reg("gw", function(p) gwStart(p, false) end)
     reg("gwlast", function(p) gwStart(p, true) end)
