@@ -420,6 +420,7 @@ local cfg = {
     glass = true,                   -- стиль Liquid Glass (стекло)
     devtag = true,                  -- метка «крутой разраб скрипта» у ника Filipp_Evans
     autoupd = true,                 -- проверять обновления при запуске
+    reptoast = true,                -- овальное уведомление о репорте
     intro = true,                   -- анимация открытия окна (только при первом запуске)
     introDone = false,              -- анимация уже показана
     lite = LITE_DEFAULT,            -- лёгкий режим: без бликов и прозрачности (меньше лагов)
@@ -448,7 +449,7 @@ local function saveCfg()
         f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
-        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "devtag=", cfg.devtag and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "introdone=", cfg.introDone and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
+        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "devtag=", cfg.devtag and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "reptoast=", cfg.reptoast and "1" or "0", "\r\n", "introdone=", cfg.introDone and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
         f:write("aiurl=", cfg.aiUrl, "\r\n", "aikey=", cfg.aiKey, "\r\n", "aimodel=", cfg.aiModel, "\r\n")
         f:write("aiprompt=", (cfg.aiPrompt:gsub("[\r\n]+", " ")), "\r\n")
         f:close()
@@ -467,6 +468,7 @@ local function loadCfg()
             elseif k == "lite" then cfg.lite = (v == "1")
             elseif k == "devtag" then cfg.devtag = (v == "1")
             elseif k == "intro" then cfg.intro = (v == "1")
+            elseif k == "reptoast" then cfg.reptoast = (v == "1")
             elseif k == "introdone" then cfg.introDone = (v == "1")
             elseif k == "autoupd" then cfg.autoupd = (v == "1")
             elseif k == "aiurl" then cfg.aiUrl = v
@@ -2054,6 +2056,7 @@ local function setupGui()
     local liteBuf = imgui.new.bool(cfg.lite)
     local tagBuf = imgui.new.bool(cfg.devtag)
     local updBuf = imgui.new.bool(cfg.autoupd)
+    local repBuf = imgui.new.bool(cfg.reptoast)
     local applyStyle   -- определяется ниже
 
     local function getBuf(b) return fromUi(ffi.string(b)) end
@@ -2531,6 +2534,10 @@ local function setupGui()
             post(saveCfg)
         end
         hint("Метка видна только вам (меняется только ваш чат).")
+        if imgui.Checkbox(U("Овальное уведомление о новом репорте (внизу экрана)"), repBuf) then
+            cfg.reptoast = repBuf[0] and true or false
+            post(saveCfg)
+        end
         if imgui.Checkbox(U("Проверять обновления при запуске"), updBuf) then
             cfg.autoupd = updBuf[0] and true or false
             post(saveCfg)
@@ -2757,6 +2764,63 @@ local function setupGui()
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
+    -- овальное уведомление о новом репорте (низ экрана по центру, цвет от акцента /fh)
+    local REP_T = 6
+    imgui.OnFrame(function()
+        if G.rep and (os.clock() - G.rep.t0 >= REP_T) then G.rep = nil end
+        return G.rep ~= nil and cfg.reptoast and not G.disabled and not G.initFailed and not G.noRepToast
+    end, function(self)
+        self.HideCursor = true
+        local r = G.rep
+        local age = os.clock() - r.t0
+        local slide = 1 - (1 - math.min(1, age / 0.45)) ^ 3
+        local fade = age > REP_T - 0.6 and math.max(0, (REP_T - age) / 0.6) or 1
+        local w = math.min(sw * 0.8, fs * 30)
+        local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
+        local flags = 0
+        pcall(function()
+            local F = imgui.WindowFlags
+            flags = F.NoTitleBar + F.NoResize + F.NoMove + F.NoInputs + F.NoScrollbar + F.AlwaysAutoResize + F.NoSavedSettings
+        end)
+        imgui.SetNextWindowPos(V2(sw / 2, sh - fs * 3.5 + (1 - slide) * fs * 4), imgui.Cond.Always, V2(0.5, 1))
+        imgui.SetNextWindowSize(V2(w, 0), imgui.Cond.Always)
+        local nVar, nCol = 0, 0
+        local function pushVar(name, v) if pcall(function() imgui.PushStyleVar(imgui.StyleVar[name], v) end) then nVar = nVar + 1 end end
+        local function pushCol(name, c) if pcall(function() imgui.PushStyleColor(imgui.Col[name], c) end) then nCol = nCol + 1 end end
+        pushVar("Alpha", fade)
+        pushVar("WindowRounding", fs * 2.2)
+        pushVar("WindowBorderSize", 2)
+        pushVar("WindowPadding", V2(fs * 1.6, fs * 0.9))
+        pushCol("WindowBg", imgui.ImVec4(ar * 0.22, ag * 0.22, ab * 0.22, 0.94))
+        pushCol("Border", imgui.ImVec4(ar, ag, ab, 0.9))
+        local began = imgui.Begin("##fhreptoast", nil, flags)
+        if began then
+            local ok, err = pcall(function()
+                local dl = imgui.GetWindowDrawList()
+                local p = imgui.GetWindowPos()
+                dl:AddCircleFilled(V2(p.x + fs * 0.9, p.y + fs * 1.1), fs * 0.35 * (1 + 0.25 * math.sin(age * 8)),
+                    imgui.ColorConvertFloat4ToU32(imgui.ImVec4(ar, ag, ab, 1)), 20)
+                local head = "Репорт от " .. r.name .. "[" .. r.id .. "]"
+                if r.more > 0 then head = head .. "  (+" .. r.more .. ")" end
+                bigText(head, imgui.ImVec4(math.min(1, ar + 0.35), math.min(1, ag + 0.35), math.min(1, ab + 0.35), 1))
+                imgui.PushTextWrapPos(w - fs * 3.2)
+                imgui.TextColored(imgui.ImVec4(1, 1, 1, 1), U(r.text))
+                imgui.PopTextWrapPos()
+            end)
+            if not ok then G.noRepToast = true print("[FH] report toast disabled: " .. tostring(err)) end
+        end
+        imgui.End()
+        if nCol > 0 then imgui.PopStyleColor(nCol) end
+        if nVar > 0 then imgui.PopStyleVar(nVar) end
+    end)
+
+    function G.reportToast(rep)
+        local text = rep.text or ""
+        if #text > 220 then text = text:sub(1, 217) .. "..." end
+        local more = (G.rep and (os.clock() - G.rep.t0) < REP_T) and (G.rep.more + 1) or 0
+        G.rep = { name = rep.name, id = rep.id, text = text, t0 = os.clock(), more = more }
+    end
+
     imgui.OnFrame(function()
         local on = G.show[0] and not G.disabled and not G.initFailed
         if not on then G.t0 = nil end
@@ -2811,6 +2875,7 @@ local function onServerMessageImpl(color, text)
     body = body:gsub("%s*|%s*Уже%s*%d+%s*репорт[^|]*$", "")
 
     table.insert(reports, 1, { name = name, id = id, text = body })
+    pcall(function() if guiState and guiState.ready() then guiState.reportToast(reports[1]) end end)
     if #reports > MAX_REPORTS then table.remove(reports) end
 
     if gw.active and not GW_IGNORE_NAMES[name] and not clean:find(GW_TAG, 1, true)
