@@ -17,7 +17,7 @@ local function toGame(s) return s end     -- строка скрипта -> игра
 local function fromGame(s) return s end   -- игра -> строка скрипта
 -- @ENC-END
 
-local VERSION = "1.8"
+local VERSION = "1.9"
 local UPDATE_FILE = "FilippHelper.lua"   -- какой файл скачивать с GitHub при обновлении
 local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
 local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
@@ -2982,6 +2982,12 @@ local function setupGui()
     local DEV_NICK, DEV_TEXT = "Filipp_Evans", "Крутой разраб скрипта"
     local devState = { id = nil, t = -10 }
     local function devScreenPos()
+        -- пока SAMP не подключён к серверу, его функции вызывать нельзя (исключение в опкоде)
+        if isSampAvailable and not isSampAvailable() then return end
+        if sampGetGamestate then
+            local okG, gs = pcall(sampGetGamestate)
+            if not okG or gs ~= 3 then return end
+        end
         local now = os.clock()
         local okMe, myId = sampGetPlayerIdByCharHandle(PLAYER_PED)
         if now - devState.t > 2 then          -- раз в 2 секунды ищем нужного игрока
@@ -3014,9 +3020,11 @@ local function setupGui()
 
     imgui.OnFrame(function() return cfg.tagmode == 0 and not G.noTag and not G.disabled and not G.initFailed end, function(self)
         self.HideCursor = true
+        if G.tagPause and os.clock() < G.tagPause then return end
         local ok, err = pcall(function()
             local sx, sy = devScreenPos()
             if not sx then return end
+            G.tagFails = 0
             local dl = (imgui.GetBackgroundDrawList or imgui.GetForegroundDrawList)()
             local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
             local txt = U(DEV_TEXT)
@@ -3030,10 +3038,12 @@ local function setupGui()
             dl:AddText(V2(x0 + padX, y0 + padY), gold, txt)
         end)
         if not ok then
-            G.noTag, G.tagErr = true, tostring(err)
-            print("[FH] dev tag disabled: " .. tostring(err))
-            fmsg("Метка над игроком: ошибка рисования (" .. tostring(err):sub(1, 80) .. "). Включён запасной способ.")
-            cfg.tagmode = 1
+            -- ошибка не должна убивать скрипт: в чат из кадра не пишем, делаем паузу и пробуем снова
+            G.tagErr = tostring(err)
+            G.tagFails = (G.tagFails or 0) + 1
+            G.tagPause = os.clock() + 8
+            print("[FH] dev tag error: " .. tostring(err))
+            if G.tagFails >= 6 then G.noTag, cfg.tagmode = true, 1 end
         end
     end)
 
