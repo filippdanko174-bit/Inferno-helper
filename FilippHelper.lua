@@ -17,7 +17,7 @@ local function toGame(s) return s end     -- строка скрипта -> игра
 local function fromGame(s) return s end   -- игра -> строка скрипта
 -- @ENC-END
 
-local VERSION = "1.6"
+local VERSION = "1.7"
 local UPDATE_FILE = "FilippHelper.lua"   -- какой файл скачивать с GitHub при обновлении
 local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
 local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
@@ -2270,6 +2270,22 @@ local function setupGui()
                     local rr = r
                     post(function() AI.suggest(rr, function() end) end)
                 end
+                imgui.Spacing()
+                imgui.PushItemWidth(-1) imgui.InputTextWithHint("##rpreason", U("Причина наказания (обязательно)"), B.modTxt, 160) imgui.PopItemWidth()
+                for _, pa in ipairs({ { "Варн", "/warn" }, { "Мут", "/mute" }, { "Джайл", "/jail" }, { "Бан", "/ban" } }) do
+                    if imgui.Button(U(pa[1]) .. "##rp" .. pa[2], V2(fs * 6, fs * 2)) then
+                        local rtx = trim(getBuf(B.modTxt))
+                        if rtx == "" then G.modMsg = "Укажите причину в поле выше."
+                        else
+                            local line = pa[2] .. " " .. r.id .. " " .. rtx
+                            G.modMsg = "Отправлено: " .. line
+                            post(function() safeSend(line) end)
+                        end
+                    end
+                    imgui.SameLine()
+                end
+                imgui.NewLine()
+                if G.modMsg then imgui.TextColored(GRAY, U(G.modMsg)) end
                 if AI.status ~= "" then imgui.TextColored(GRAY, toUi(AI.status)) end
             else hint("Выберите репорт из списка.") end
         end
