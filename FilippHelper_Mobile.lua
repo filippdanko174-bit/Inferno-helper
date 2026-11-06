@@ -1954,7 +1954,24 @@ local function setupGui()
         if not c then c = toUi(s) ucache[s] = c end
         return c
     end
-    local function title(s) imgui.TextColored(ACC, U(s)) imgui.Separator() imgui.Spacing() end
+    -- крупный текст (второй шрифт, если удалось загрузить)
+    local function bigText(s, color)
+        local pushed = G.big and pcall(imgui.PushFont, G.big)
+        imgui.TextColored(color or ACC, U(s))
+        if pushed then imgui.PopFont() end
+    end
+    local function title(s, sub)
+        bigText(s, ACC)
+        if sub then imgui.TextColored(GRAY, U(sub)) end
+        imgui.Separator() imgui.Spacing()
+    end
+    -- главная кнопка действия: цвет акцента
+    local function primary(label, size)
+        imgui.PushStyleColor(imgui.Col.Button, imgui.ImVec4(cfg.accent[1] * 0.85, cfg.accent[2] * 0.85, cfg.accent[3] * 0.85, 0.85))
+        local clicked = imgui.Button(U(label), size)
+        imgui.PopStyleColor()
+        return clicked
+    end
     local function hint(s) imgui.TextColored(GRAY, U(s)) end
 
     ------------------------------------------------------------------
@@ -2034,7 +2051,7 @@ local function setupGui()
                     post(function() cmdAr(id) end)
                 end
                 imgui.SameLine()
-                if imgui.Button(U("ИИ ответ") .. "##aibtn", V2(fs * 8, fs * 2)) then
+                if primary("ИИ ответ##aibtn", V2(fs * 8, fs * 2)) then
                     local rr = r
                     post(function() AI.suggest(rr, function() end) end)
                 end
@@ -2100,24 +2117,35 @@ local function setupGui()
     end
 
     pages[12] = { "Главная", function()
-        title("Главная")
+        title("Главная", "Быстрые действия и состояние")
         local active = CHK and CHK.active
-        imgui.TextColored(GRAY, U("ID из /re: " .. tostring(watchedId or "-") .. "   |   Репортов в списке: " .. #reports ..
-            "   |   Авто-/mp: " .. (cfg.automp and "вкл" or "выкл")))
-        if active then imgui.TextColored(GREEN, U("Идёт проверка активности. Отметились: " .. #CHK.list)) end
+        local function tile(id, label, value, color)
+            imgui.BeginChild("##tile" .. id, V2(fs * 8.6, fs * 4.2), true)
+            imgui.TextColored(GRAY, U(label))
+            bigText(value, color)
+            imgui.EndChild()
+        end
+        tile(1, "Репортов в списке", tostring(#reports), ACC) imgui.SameLine()
+        tile(2, "Авто-/mp", cfg.automp and "вкл" or "выкл", cfg.automp and GREEN or GRAY) imgui.SameLine()
+        tile(3, "Проверка активности", active and ("идёт: " .. #CHK.list) or "нет", active and GREEN or GRAY) imgui.SameLine()
+        tile(4, "ID из /re", tostring(watchedId or "-"), YEL)
         imgui.Spacing()
-        imgui.TextColored(YEL, U("Быстрые действия"))
         local bw = V2(fs * 12.5, fs * 2.4)
-        local function btn(label, id, fn, same)
-            if imgui.Button(U(label) .. "##h" .. id, bw) then post(fn) end
+        local function btn(label, id, fn, same, prim)
+            local clicked
+            if prim then clicked = primary(label .. "##h" .. id, bw) else clicked = imgui.Button(U(label) .. "##h" .. id, bw) end
+            if clicked then post(fn) end
             if same then imgui.SameLine() end
         end
-        btn("Проверка активности", 1, function() INFO.a1(selNames()) end, true)
+        imgui.TextColored(ACC, U("ПРОВЕРКИ И РЕПОРТЫ"))
+        btn("Проверка активности", 1, function() INFO.a1(selNames()) end, true, true)
         btn("Список репортов", 2, function() G.page = 3 end, true)
         btn("Раздача призов", 3, function() G.page = 2 end, false)
+        imgui.Spacing() imgui.TextColored(ACC, U("ТРАНСПОРТ"))
         btn("Заправить кары", 4, function() carsDo("fuel") end, true)
         btn("Заспавнить кары", 5, function() carsDo("spawn") end, true)
         btn("Удалить адм-кары (15 с)", 6, function() carsDo("dv") end, false)
+        imgui.Spacing() imgui.TextColored(ACC, U("МЕРОПРИЯТИЯ И ОБЪЯВЛЕНИЯ"))
         btn("Нажать /mp", 7, function() armAutoMp(true) end, true)
         btn("Правила лидерам", 8, function() INFO.rules() end, true)
         btn("Инфо игрокам", 9, function() INFO.inf() end, false)
@@ -2166,7 +2194,7 @@ local function setupGui()
         for _, l in ipairs(lines) do imgui.TextWrapped(U(l)) end
         imgui.Spacing()
         local bw = V2(fs * 11, fs * 2.2)
-        if imgui.Button(U("Начать проверку") .. "##chkgo", bw) then
+        if primary("Начать проверку##chkgo", bw) then
             local names = selNames()
             post(function() sayA1(names, { word = word, seconds = secs }) end)
         end
@@ -2417,8 +2445,8 @@ local function setupGui()
         -- левое меню
         imgui.BeginChild("##side", V2(fs * 10, 0), true)
         guarded(function()
-            imgui.TextColored(ACC, U("FilippHelper"))
-            imgui.TextColored(GRAY, U("v" .. VERSION))
+            bigText("FilippHelper", ACC)
+            imgui.TextColored(GRAY, U("by ByFilipp  ·  v" .. VERSION))
             imgui.Separator() imgui.Spacing()
             -- группы меню; настройки всегда в самом низу
             local groups = {
@@ -2451,6 +2479,7 @@ local function setupGui()
             end
             local si = byName["Настройки"]
             if si then imgui.Separator() imgui.Spacing() drawBtn(si) end
+            imgui.Spacing() imgui.TextColored(GRAY, U("Поддержка: @ByFilipp123"))
         end)
         imgui.EndChild()
         imgui.SameLine()
@@ -2531,6 +2560,7 @@ local function setupGui()
         local ok, err = pcall(function()
             local io = imgui.GetIO()
             io.Fonts:AddFontFromFileTTF(fontPath, fs, nil, io.Fonts:GetGlyphRangesCyrillic())
+            pcall(function() G.big = io.Fonts:AddFontFromFileTTF(fontPath, math.floor(fs * 1.45), nil, io.Fonts:GetGlyphRangesCyrillic()) end)
             applyStyle()
         end)
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
