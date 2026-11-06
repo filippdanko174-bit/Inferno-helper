@@ -476,7 +476,7 @@ local function loadCfg()
             if k == "automp" then cfg.automp = (v == "1")
             elseif k == "glass" then cfg.glass = (v == "1")
             elseif k == "lite" then cfg.lite = (v == "1")
-            elseif k == "tagmode" then cfg.tagmode = (tonumber(v) == 1) and 1 or 0
+            elseif k == "tagmode" then cfg.tagmode = 2 -- временно отключено для проверки вылетов
             elseif k == "intro" then cfg.intro = (v == "1")
             elseif k == "reptoast" then cfg.reptoast = (v == "1")
             elseif k == "introdone" then cfg.introDone = (v == "1")
