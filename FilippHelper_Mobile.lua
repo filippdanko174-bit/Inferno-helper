@@ -418,6 +418,8 @@ local cfg = {
     bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
     alpha = 0.97,                   -- прозрачность фона
     glass = true,                   -- стиль Liquid Glass (стекло)
+    devtag = true,                  -- метка «крутой разраб скрипта» у ника Filipp_Evans
+    intro = true,                   -- анимация открытия окна
     lite = LITE_DEFAULT,            -- лёгкий режим: без бликов и прозрачности (меньше лагов)
     aiUrl = "https://api.openai.com/v1/chat/completions",
     aiKey = "",
@@ -444,7 +446,7 @@ local function saveCfg()
         f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
-        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n")
+        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "devtag=", cfg.devtag and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n")
         f:write("aiurl=", cfg.aiUrl, "\r\n", "aikey=", cfg.aiKey, "\r\n", "aimodel=", cfg.aiModel, "\r\n")
         f:write("aiprompt=", (cfg.aiPrompt:gsub("[\r\n]+", " ")), "\r\n")
         f:close()
@@ -461,6 +463,8 @@ local function loadCfg()
             if k == "automp" then cfg.automp = (v == "1")
             elseif k == "glass" then cfg.glass = (v == "1")
             elseif k == "lite" then cfg.lite = (v == "1")
+            elseif k == "devtag" then cfg.devtag = (v == "1")
+            elseif k == "intro" then cfg.intro = (v == "1")
             elseif k == "aiurl" then cfg.aiUrl = v
             elseif k == "aikey" then cfg.aiKey = v
             elseif k == "aimodel" then cfg.aiModel = v
@@ -1926,6 +1930,8 @@ local function setupGui()
     local autoBuf = imgui.new.bool(cfg.automp)
     local glassBuf = imgui.new.bool(cfg.glass)
     local liteBuf = imgui.new.bool(cfg.lite)
+    local introBuf = imgui.new.bool(cfg.intro)
+    local tagBuf = imgui.new.bool(cfg.devtag)
     local applyStyle   -- определяется ниже
 
     local function getBuf(b) return fromUi(ffi.string(b)) end
@@ -2385,6 +2391,15 @@ local function setupGui()
             post(saveCfg)
         end
         hint("Убирает блики и прозрачность окна - заметно меньше нагрузка на телефоне.")
+        if imgui.Checkbox(U("Анимация открытия окна"), introBuf) then
+            cfg.intro = introBuf[0] and true or false
+            post(saveCfg)
+        end
+        if imgui.Checkbox(U("Метка «крутой разраб скрипта» у Filipp_Evans в чате"), tagBuf) then
+            cfg.devtag = tagBuf[0] and true or false
+            post(saveCfg)
+        end
+        hint("Метка видна только вам (меняется только ваш чат).")
         imgui.Spacing() imgui.Separator() imgui.Spacing()
         title("Мероприятия")
         if imgui.Checkbox(U("После анонса МП вводить /mp и нажимать 1-ю строку"), autoBuf) then
@@ -2556,6 +2571,45 @@ local function setupGui()
         end
     end
 
+    -- анимация открытия: вращающаяся искра, печатающееся название и надпись «ByFilipp & Claude»
+    local INTRO_T = 2.3
+    local function drawIntro(age)
+        local dl = imgui.GetWindowDrawList()
+        local p, sz = imgui.GetWindowPos(), imgui.GetWindowSize()
+        local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
+        local function col(r, g, b, a) return imgui.ColorConvertFloat4ToU32(imgui.ImVec4(r, g, b, a)) end
+        local k = math.min(1, age / 0.7)
+        local ease = 1 - (1 - k) ^ 3
+        local fade = age > INTRO_T - 0.45 and math.max(0, (INTRO_T - age) / 0.45) or 1
+        local a = ease * fade
+        local cx, cy = p.x + sz.x / 2, p.y + sz.y / 2 - fs * 2.2
+        local R = fs * 3.4 * ease
+        for i = 0, 15 do
+            local ang = age * 1.6 + i * math.pi / 8
+            local len = R * (i % 2 == 0 and 1 or 0.55) * (0.85 + 0.15 * math.sin(age * 5 + i))
+            dl:AddLine(V2(cx, cy), V2(cx + math.cos(ang) * len, cy + math.sin(ang) * len), col(ar, ag, ab, a * 0.9), 3)
+        end
+        dl:AddCircleFilled(V2(cx, cy), fs * 0.7 * ease, col(1, 1, 1, a), 24)
+        dl:AddCircle(V2(cx, cy), R * 1.12, col(ar, ag, ab, a * 0.35), 48, 2)
+        local function centered(str, y, c, big)
+            local pushed = big and G.big and pcall(imgui.PushFont, G.big)
+            local w = imgui.CalcTextSize(U(str)).x
+            imgui.SetCursorPos(V2((sz.x - w) / 2, y))
+            imgui.TextColored(c, U(str))
+            if pushed then imgui.PopFont() end
+        end
+        local full = "FilippHelper"
+        local n = math.max(0, math.min(#full, math.floor((age - 0.35) / 0.08)))
+        centered(full:sub(1, n), sz.y / 2 + fs * 1.8, imgui.ImVec4(1, 1, 1, fade), true)
+        local sa = math.max(0, math.min(1, (age - 1.1) / 0.5)) * fade
+        centered("by ByFilipp  &  Claude", sz.y / 2 + fs * 4.4, imgui.ImVec4(ar, ag, ab, sa), false)
+        -- полоса загрузки
+        local bw, by = sz.x * 0.28, p.y + sz.y / 2 + fs * 6.6
+        local bx = cx - bw / 2
+        dl:AddRectFilled(V2(bx, by), V2(bx + bw, by + 4), col(1, 1, 1, 0.12 * fade), 2)
+        dl:AddRectFilled(V2(bx, by), V2(bx + bw * math.min(1, age / (INTRO_T - 0.4)), by + 4), col(ar, ag, ab, 0.9 * fade), 2)
+    end
+
     imgui.OnInitialize(function()
         local ok, err = pcall(function()
             local io = imgui.GetIO()
@@ -2566,13 +2620,29 @@ local function setupGui()
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
-    imgui.OnFrame(function() return G.show[0] and not G.disabled and not G.initFailed end, function(self)
+    imgui.OnFrame(function()
+        local on = G.show[0] and not G.disabled and not G.initFailed
+        if not on then G.t0 = nil end
+        return on
+    end, function(self)
         self.HideCursor = false
         imgui.SetNextWindowSize(V2(fs * 50, fs * 30), imgui.Cond.FirstUseEver)
         imgui.SetNextWindowPos(V2(sw / 2, sh / 2), imgui.Cond.FirstUseEver, V2(0.5, 0.5))
         if imgui.Begin("FilippHelper##fh", G.show, imgui.WindowFlags.NoCollapse) then
             drawGlass()
-            guarded(drawBody)
+            if not G.t0 then G.t0 = os.clock() end
+            local age = os.clock() - G.t0
+            if cfg.intro and not G.noIntro and age < INTRO_T then
+                local okI, errI = pcall(drawIntro, age)
+                if not okI then
+                    G.noIntro = true
+                    print("[FH] intro disabled: " .. tostring(errI))
+                end
+                local okC, clicked = pcall(imgui.IsMouseClicked, 0)
+                if okC and clicked then G.t0 = os.clock() - INTRO_T end
+            else
+                guarded(drawBody)
+            end
         end
         imgui.End()
     end)
@@ -2608,9 +2678,24 @@ local function onServerMessageImpl(color, text)
     end
 end
 
+-- метка у ника разработчика (меняется только ваш чат)
+local DEV_NICK = "Filipp_Evans"
+local function devTagText(color, text)
+    if not text:find(DEV_NICK, 1, true) or text:find(toGame("разраб скрипта"), 1, true) then return nil end
+    local rgb = math.floor((tonumber(color) or 0) % 4294967296 / 256) % 16777216
+    local tag = toGame(" {FFD700}[Крутой разраб скрипта]{" .. string.format("%06X", rgb) .. "}")
+    local out, n = text:gsub("(" .. DEV_NICK .. "%[?%d*%]?)", "%1" .. tag:gsub("%%", "%%%%"), 1)
+    if n == 0 then return nil end
+    return out
+end
+
 function ev.onServerMessage(color, text)
     local ok, err = pcall(onServerMessageImpl, color, text)
     if not ok then print("[FH] onServerMessage error: " .. tostring(err)) end
+    if cfg.devtag and type(text) == "string" then
+        local okT, newText = pcall(devTagText, color, text)
+        if okT and newText then return { color, newText } end
+    end
 end
 
 function ev.onSendCommand(command)
