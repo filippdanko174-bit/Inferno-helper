@@ -2620,6 +2620,42 @@ local function setupGui()
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
+    -- всплывающее уведомление о загрузке (справа сверху)
+    local TOAST_T = 6
+    imgui.OnFrame(function()
+        if G.toastT0 and (os.clock() - G.toastT0 >= TOAST_T) then G.toastT0 = nil end
+        return G.toastT0 ~= nil and cfg.intro and not G.disabled and not G.initFailed and not G.noToast
+    end, function(self)
+        self.HideCursor = true
+        local age = os.clock() - G.toastT0
+        local slide = 1 - (1 - math.min(1, age / 0.5)) ^ 3
+        local fade = age > TOAST_T - 0.6 and math.max(0, (TOAST_T - age) / 0.6) or 1
+        local w = fs * 22
+        local flags = 0
+        pcall(function()
+            local F = imgui.WindowFlags
+            flags = F.NoTitleBar + F.NoResize + F.NoMove + F.NoInputs + F.NoScrollbar + F.AlwaysAutoResize
+        end)
+        imgui.SetNextWindowPos(V2(sw - (w + fs) * slide, fs * 3), imgui.Cond.Always)
+        imgui.SetNextWindowSize(V2(w, 0), imgui.Cond.Always)
+        local pushed = pcall(function() imgui.PushStyleVar(imgui.StyleVar.Alpha, fade) end)
+        local began = imgui.Begin("##fhtoast", nil, flags)
+        if began then
+            local ok, err = pcall(function()
+                local dl = imgui.GetWindowDrawList()
+                local p, sz = imgui.GetWindowPos(), imgui.GetWindowSize()
+                dl:AddRectFilled(p, V2(p.x + 5, p.y + sz.y), imgui.ColorConvertFloat4ToU32(ACC), 2)
+                bigText("FilippHelper загружен", ACC)
+                imgui.TextColored(GRAY, U("Автор: ByFilipp  ·  при участии Claude"))
+                imgui.TextColored(YEL, U("Меню: /fh   ·   команды: /fcmd"))
+                imgui.TextColored(GRAY, U("Поддержка: @ByFilipp123"))
+            end)
+            if not ok then G.noToast = true print("[FH] toast disabled: " .. tostring(err)) end
+        end
+        imgui.End()
+        if pushed then imgui.PopStyleVar() end
+    end)
+
     imgui.OnFrame(function()
         local on = G.show[0] and not G.disabled and not G.initFailed
         if not on then G.t0 = nil end
@@ -2649,6 +2685,7 @@ local function setupGui()
 
     function G.ready() return not G.disabled and not G.initFailed end
     function G.toggle() G.show[0] = not G.show[0] end
+    function G.notify() G.toastT0 = os.clock() end
     return G
 end
 
@@ -2764,7 +2801,10 @@ function main()
     local okB, errB = pcall(setupBinder, builtin, guardedReg)
     if not okB then print("[FH] binder setup error: " .. tostring(errB)) end
 
-    fmsg("Загружен. Меню: {FFFF00}/fh")
+    fmsg("{FFD700}FilippHelper v" .. VERSION .. " {FFFFFF}- загружен")
+    fmsg("{A9A9A9}Автор: {66CCFF}ByFilipp {A9A9A9}| при участии {66CCFF}Claude {A9A9A9}(Anthropic)")
+    fmsg("{A9A9A9}Меню: {FFFF00}/fh {A9A9A9}| команды: {FFFF00}/fcmd {A9A9A9}| поддержка: {FFFF00}@ByFilipp123")
+    pcall(function() if guiState and guiState.ready() then guiState.notify() end end)
 
     while true do
         wait(100)
