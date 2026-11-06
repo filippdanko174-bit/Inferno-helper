@@ -17,7 +17,7 @@ local function toGame(s) return s end     -- строка скрипта -> игра
 local function fromGame(s) return s end   -- игра -> строка скрипта
 -- @ENC-END
 
-local VERSION = "1.9"
+local VERSION = "2.0"
 local UPDATE_FILE = "FilippHelper.lua"   -- какой файл скачивать с GitHub при обновлении
 local MAX_CHAT_LEN = 128   -- безопасна€ длина строки дл€ sampSendChat
 local SEND_GAP = 1100      -- пауза между сообщени€ми (антифлуд сервера)
@@ -2979,7 +2979,7 @@ local function setupGui()
 
     -- метка Ђкрутой разраб скриптаї над головой игрока Filipp_Evans (всегда включена,
     -- видна всем, у кого стоит скрипт). –исуетс€ через imgui; запасной способ - render-функции MoonLoader (/tagmode).
-    local DEV_NICK, DEV_TEXT = "Filipp_Evans", " рутой разраб скрипта"
+    local DEV_NICK, DEV_TEXT = "Filipp_Evans", "ByFilipp"
     local devState = { id = nil, t = -10 }
     local function devScreenPos()
         -- пока SAMP не подключЄн к серверу, его функции вызывать нельз€ (исключение в опкоде)
@@ -3026,16 +3026,20 @@ local function setupGui()
             if not sx then return end
             G.tagFails = 0
             local dl = (imgui.GetBackgroundDrawList or imgui.GetForegroundDrawList)()
-            local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
-            local txt = U(DEV_TEXT)
-            local w = imgui.CalcTextSize(txt).x
-            local padX, padY = fs * 0.7, fs * 0.25
-            local x0, y0 = sx - w / 2 - padX, sy - fs * 1.4 - padY
-            local x1, y1 = x0 + w + padX * 2, y0 + fs * 1.1 + padY * 2
-            local gold = imgui.ColorConvertFloat4ToU32(imgui.ImVec4(1, 0.84, 0, 1))
-            dl:AddRectFilled(V2(x0, y0), V2(x1, y1), imgui.ColorConvertFloat4ToU32(imgui.ImVec4(ar * 0.25, ag * 0.25, ab * 0.25, 0.85)), fs * 0.9)
-            dl:AddRect(V2(x0, y0), V2(x1, y1), gold, fs * 0.9)
-            dl:AddText(V2(x0 + padX, y0 + padY), gold, txt)
+            local t = os.clock()
+            local txt = DEV_TEXT
+            local total = imgui.CalcTextSize(txt).x
+            local x = sx - total / 2
+            local y = sy - fs * 1.6
+            for i = 1, #txt do
+                local ch = txt:sub(i, i)
+                local k = 0.5 + 0.5 * math.sin(t * 3 - i * 0.7)          -- бегуща€ волна €ркости
+                local col = imgui.ColorConvertFloat4ToU32(imgui.ImVec4(0.1 + 0.25 * k, 0.55 + 0.45 * k, 0.2 + 0.2 * k, 1))
+                local shadow = imgui.ColorConvertFloat4ToU32(imgui.ImVec4(0, 0, 0, 0.8))
+                dl:AddText(V2(x + 1, y + 1), shadow, ch)
+                dl:AddText(V2(x, y), col, ch)
+                x = x + imgui.CalcTextSize(ch).x
+            end
         end)
         if not ok then
             -- ошибка не должна убивать скрипт: в чат из кадра не пишем, делаем паузу и пробуем снова
@@ -3059,7 +3063,8 @@ local function setupGui()
                     if ok and sx then
                         pcall(function()
                             local w = renderGetFontDrawTextLength(font, text)
-                            renderFontDrawText(font, text, sx - w / 2, sy - 24, 0xFFFFD700)
+                            local k = 0.5 + 0.5 * math.sin(os.clock() * 3)
+                            renderFontDrawText(font, text, sx - w / 2, sy - 24, 0xFF000000 + math.floor(140 + 115 * k) * 256 + math.floor(40 + 40 * k))
                         end)
                     end
                 else
