@@ -460,6 +460,8 @@ local cfg = {
     alpha = 0.97,                   -- прозрачность фона
     glass = true,                   -- стиль Liquid Glass (стекло)
     autoupd = true,                 -- проверять обновления при запуске
+    safe = false,                   -- безопасный режим: вместо окна /fh диалоги и чат
+    force = false,                  -- принудительно включить окно (/fhgui on)
     reptoast = true,                -- овальное уведомление о репорте
     intro = true,                   -- анимация открытия окна (только при первом запуске)
     introDone = false,              -- анимация уже показана
@@ -489,7 +491,7 @@ local function saveCfg()
         f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
-        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "reptoast=", cfg.reptoast and "1" or "0", "\r\n", "introdone=", cfg.introDone and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
+        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "safe=", cfg.safe and "1" or "0", "\r\n", "force=", cfg.force and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "reptoast=", cfg.reptoast and "1" or "0", "\r\n", "introdone=", cfg.introDone and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
         f:write("aiurl=", cfg.aiUrl, "\r\n", "aikey=", cfg.aiKey, "\r\n", "aimodel=", cfg.aiModel, "\r\n")
         f:write("aiprompt=", (cfg.aiPrompt:gsub("[\r\n]+", " ")), "\r\n")
         f:close()
@@ -506,6 +508,8 @@ local function loadCfg()
             if k == "automp" then cfg.automp = (v == "1")
             elseif k == "glass" then cfg.glass = (v == "1")
             elseif k == "lite" then cfg.lite = (v == "1")
+            elseif k == "safe" then cfg.safe = (v == "1")
+            elseif k == "force" then cfg.force = (v == "1")
             elseif k == "intro" then cfg.intro = (v == "1")
             elseif k == "reptoast" then cfg.reptoast = (v == "1")
             elseif k == "introdone" then cfg.introDone = (v == "1")
@@ -690,6 +694,38 @@ end
 
 loadCfg()
 loadTemplates()
+-- Защита от вылетов окна: пока окно или уведомление на экране, лежит файл-метка. Если игра упала,
+-- метка остаётся, и при следующем запуске включается безопасный режим (диалоги и чат вместо imgui-окна).
+local GUARD = { on = false, notice = nil, warned = false }
+function GUARD.path() return configDir() .. "/FilippHelper.gui" end
+function GUARD.set(on)
+    if on == GUARD.on then return end
+    GUARD.on = on
+    pcall(function()
+        if on then
+            local f = io.open(GUARD.path(), "wb")
+            if f then f:write("1") f:close() end
+        else
+            os.remove(GUARD.path())
+        end
+    end)
+end
+local function guiAllowed()
+    if cfg.safe then return false end
+    if cfg.force then return true end
+    return not (package.loaded and package.loaded["imgui"])   -- старый imgui в одной игре с mimgui конфликтует
+end
+pcall(function()
+    local f = io.open(GUARD.path(), "rb")
+    if f then
+        f:close()
+        os.remove(GUARD.path())
+        cfg.safe, cfg.force = true, false
+        GUARD.notice = true
+        saveCfg()
+    end
+end)
+
 
 ----------------------------------------------------------------------
 -- РЕПОРТЫ: журнал последних обращений и быстрый ответ
@@ -2096,6 +2132,7 @@ local MENU_ROWS = {
     { "/rpl", "обновить список репортов из /define" },
     { "/rr [ID] текст", "ответить игроку через /pm" },
     { "/reptest  /fhdiag", "проверка овального уведомления о репорте; диагностика кодировки и окна" },
+    { "/fhgui [on|off]", "окно /fh или безопасный режим (диалоги и чат)" },
     { "/fhupd [install]", "проверка обновлений на GitHub; install - скачать и установить" },
     { "/ai [ID]  /aiset  /aidiag", "ИИ-подсказка ответа на репорт; настройка API (/aiset url|key|model|prompt); /aidiag - что доступно для запросов" },
     { "/ar ID", "ответ + текст жалобы в /a" },
@@ -3008,7 +3045,10 @@ local function setupGui()
     local REP_T = 6
     imgui.OnFrame(function()
         if G.rep and (os.clock() - G.rep.t0 >= REP_T) then G.rep = nil end
-        return G.rep ~= nil and cfg.reptoast and not G.disabled and not G.initFailed and not G.noRepToast
+        local on = G.rep ~= nil and cfg.reptoast and not G.disabled and not G.initFailed and not G.noRepToast and guiAllowed()
+        G.toastOn = on and true or false
+        GUARD.set(G.mainOn == true or G.toastOn)
+        return on
     end, function(self)
         self.HideCursor = true
         local r = G.rep
@@ -3074,7 +3114,9 @@ local function setupGui()
     end
 
     imgui.OnFrame(function()
-        local on = G.show[0] and not G.disabled and not G.initFailed
+        local on = G.show[0] and not G.disabled and not G.initFailed and guiAllowed()
+        G.mainOn = on and true or false
+        GUARD.set(G.mainOn or G.toastOn == true)
         if not on then G.t0 = nil end
         return on
     end, function(self)
@@ -3104,7 +3146,7 @@ local function setupGui()
         imgui.End()
     end)
 
-    function G.ready() return not G.disabled and not G.initFailed end
+    function G.ready() return not G.disabled and not G.initFailed and guiAllowed() end
     function G.toggle() G.show[0] = not G.show[0] end
     return G
 end
@@ -3128,6 +3170,9 @@ local function onServerMessageImpl(color, text)
 
     table.insert(reports, 1, { name = name, id = id, text = body })
     pcall(function() if guiState and guiState.ready() then guiState.reportToast(reports[1]) end end)
+    if cfg.reptoast and not (guiState and guiState.ready()) then
+        fmsg("{FFFF00}Репорт от " .. name .. "[" .. id .. "]: {FFFFFF}" .. body)
+    end
     if #reports > MAX_REPORTS then table.remove(reports) end
 
     if gw.active and not GW_IGNORE_NAMES[name] and not clean:find(GW_TAG, 1, true)
@@ -3222,7 +3267,28 @@ local function registerCommands(reg)
     registerExtra(reg)
     registerPorted(reg)
     reg("fh", function()
-        if guiState and guiState.ready() then guiState.toggle() else uiMenu() end
+        if guiState and guiState.ready() then guiState.toggle()
+        else
+            if not guiAllowed() and not GUARD.warned then
+                GUARD.warned = true
+                fmsg("Окно /fh отключено (безопасный режим или конфликт с другим imgui), открываю меню диалогами. Включить окно: /fhgui on")
+            end
+            uiMenu()
+        end
+    end)
+    reg("fhgui", function(p)
+        p = lower1251(trim(p or ""))
+        if p == "on" then
+            cfg.safe, cfg.force, GUARD.warned = false, true, false
+            saveCfg()
+            fmsg("Окно /fh включено. Если игра снова вылетит на окне, безопасный режим включится сам.")
+        elseif p == "off" then
+            cfg.safe = true
+            saveCfg()
+            fmsg("Безопасный режим: вместо окна /fh диалоги и чат. Вернуть окно: /fhgui on")
+        else
+            fmsg("Окно /fh: " .. (guiAllowed() and "включено" or "выключено (безопасный режим или конфликт imgui)") .. ". Команды: /fhgui on | off")
+        end
     end)
     reg("reports", uiReports)
     reg("rpl", function() DEF.refresh() end)
@@ -3286,6 +3352,9 @@ function main()
     end
     wait(1500)
     fmsg("{FFD700}FilippHelper v" .. VERSION .. " {FFFFFF}- загружен")
+    if GUARD.notice then
+        fmsg("{FF6666}Прошлый запуск закрылся на окне /fh. Включён безопасный режим: вместо окна диалоги и чат. Вернуть окно: /fhgui on")
+    end
     fmsg("{A9A9A9}Автор и разработчик: {66CCFF}ByFilipp {A9A9A9}| при участии {66CCFF}Claude {A9A9A9}(Anthropic)")
     fmsg("{A9A9A9}Раздачи, репорты, мероприятия, проверка активности, транспорт, биндер и ИИ-ответы - в одном окне")
     fmsg("{A9A9A9}Окно управления: {FFFF00}/fh {A9A9A9}| все команды: {FFFF00}/fcmd {A9A9A9}| биндер: {FFFF00}/fbind")
@@ -3304,4 +3373,9 @@ function main()
         local okT, errT = pcall(uiTick)
         if not okT then print("[FH] tick error: " .. tostring(errT)) end
     end
+end
+
+function onScriptTerminate(scr, quitGame)
+    local ok, me = pcall(thisScript)
+    if ok and scr == me then GUARD.set(false) end
 end
