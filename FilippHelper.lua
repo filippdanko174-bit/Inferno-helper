@@ -2246,9 +2246,7 @@ local function setupGui()
     end
     -- крупный текст (второй шрифт, если удалось загрузить)
     local function bigText(s, color)
-        pcall(imgui.SetWindowFontScale, 1.45)
         imgui.TextColored(color or ACC, U(s))
-        pcall(imgui.SetWindowFontScale, 1)
     end
     local function title(s, sub)
         bigText(s, ACC)
@@ -2761,25 +2759,7 @@ local function setupGui()
             applyColors()
         end
         imgui.Spacing()
-        if imgui.Checkbox(U("Стиль Liquid Glass (стекло)"), glassBuf) then
-            cfg.glass = glassBuf[0] and true or false
-            applyStyle()
-            post(saveCfg)
-        end
-        hint("Полупрозрачные панели и цветные блики. Прозрачность регулируется ползунком выше.")
-        if imgui.Checkbox(U("Лёгкий режим (если окно лагает)"), liteBuf) then
-            cfg.lite = liteBuf[0] and true or false
-            applyStyle()
-            post(saveCfg)
-        end
-        hint("Убирает блики и прозрачность окна - заметно меньше нагрузка на телефоне.")
-        if imgui.Button(U("Показать анимацию открытия снова") .. "##introagain", V2(fs * 16, fs * 2)) then
-            cfg.introDone = false
-            G.t0 = nil
-            post(saveCfg)
-        end
-        hint("Анимация показывается только при первом запуске.")
-        if imgui.Checkbox(U("Овальное уведомление о новом репорте (внизу экрана)"), repBuf) then
+        if imgui.Checkbox(U("Сообщение в чат о новом репорте"), repBuf) then
             cfg.reptoast = repBuf[0] and true or false
             post(saveCfg)
         end
@@ -2902,25 +2882,9 @@ local function setupGui()
         local br, bg_, bb = cfg.bg[1], cfg.bg[2], cfg.bg[3]
         local function lift(v, d) return math.max(0, math.min(1, v + d)) end
         st.WindowPadding, st.FramePadding, st.ItemSpacing = V2(12, 12), V2(8, 6), V2(8, 8)
-        if cfg.glass then
-            -- Liquid Glass: полупрозрачные панели, светлые тонкие границы, большие скругления
-            st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding, st.ScrollbarRounding = 22, 16, 12, 10, 12
-            st.WindowBorderSize, st.ChildBorderSize, st.FrameBorderSize = 1, 1, 1
-            set("WindowBg", br, bg_, bb, cfg.lite and 1 or cfg.alpha * 0.6)
-            set("ChildBg", 1, 1, 1, 0.06)
-            set("Border", 1, 1, 1, 0.28)
-            set("Text", 0.96, 0.97, 1.0)
-            set("FrameBg", 1, 1, 1, 0.08) set("FrameBgHovered", 1, 1, 1, 0.15) set("FrameBgActive", 1, 1, 1, 0.20)
-            set("TitleBg", br, bg_, bb, 0.35) set("TitleBgActive", br, bg_, bb, 0.55) set("TitleBgCollapsed", br, bg_, bb, 0.35)
-            set("Button", 1, 1, 1, 0.10) set("ButtonHovered", ar, ag, ab, 0.55) set("ButtonActive", ar, ag, ab, 0.75)
-            set("Header", ar, ag, ab, 0.35) set("HeaderHovered", ar, ag, ab, 0.50) set("HeaderActive", ar, ag, ab, 0.65)
-            set("CheckMark", ar, ag, ab) set("SliderGrab", ar, ag, ab) set("SliderGrabActive", ar * 0.8, ag * 0.8, ab * 0.8)
-            set("Separator", 1, 1, 1, 0.18)
-            set("ScrollbarBg", 0, 0, 0, 0) set("ScrollbarGrab", 1, 1, 1, 0.25)
-        else
             st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding, st.ScrollbarRounding = 10, 8, 6, 6, 8
             st.WindowBorderSize, st.ChildBorderSize, st.FrameBorderSize = 1, 1, 0
-            set("WindowBg", br, bg_, bb, cfg.lite and 1 or cfg.alpha)
+            set("WindowBg", br, bg_, bb, cfg.alpha)
             set("ChildBg", lift(br, 0.03), lift(bg_, 0.03), lift(bb, 0.04))
             set("Border", lift(br, 0.13), lift(bg_, 0.14), lift(bb, 0.18)) set("Text", 0.92, 0.93, 0.95)
             set("FrameBg", lift(br, 0.07), lift(bg_, 0.08), lift(bb, 0.10))
@@ -2931,73 +2895,6 @@ local function setupGui()
             set("Header", ar * 0.75, ag * 0.75, ab * 0.75, 0.6) set("HeaderHovered", ar, ag, ab, 0.7) set("HeaderActive", ar, ag, ab)
             set("CheckMark", ar, ag, ab) set("SliderGrab", ar, ag, ab) set("SliderGrabActive", ar * 0.8, ag * 0.8, ab * 0.8)
             set("Separator", lift(br, 0.15), lift(bg_, 0.17), lift(bb, 0.22))
-        end
-    end
-
-    -- декор стекла: мягкие цветные блики за панелями и световая полоса сверху
-    local function drawGlass()
-        if not cfg.glass or cfg.lite or G.noDeco then return end
-        local ok, err = pcall(function()
-            local dl = imgui.GetWindowDrawList()
-            local p, sz = imgui.GetWindowPos(), imgui.GetWindowSize()
-            local w, h = sz.x, sz.y
-            local function col(r, g, b, a) return imgui.ColorConvertFloat4ToU32(imgui.ImVec4(r, g, b, a)) end
-            local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
-            local blobs = {
-                { 0.78, 0.15, ar, ag, ab }, { 0.25, 0.90, ab, ar, ag },
-            }
-            local R = h * 0.35
-            for _, b in ipairs(blobs) do
-                for k = 0, 3 do
-                    dl:AddCircleFilled(V2(p.x + w * b[1], p.y + h * b[2]), R * (1 - k * 0.22), col(b[3], b[4], b[5], 0.05), 48)
-                end
-            end
-            local top, bot = col(1, 1, 1, 0.14), col(1, 1, 1, 0)
-            dl:AddRectFilledMultiColor(V2(p.x + 22, p.y + 2), V2(p.x + w - 22, p.y + h * 0.10), top, top, bot, bot)
-        end)
-        if not ok then
-            G.noDeco = true
-            print("[FH] glass decoration disabled: " .. tostring(err))
-        end
-    end
-
-    -- анимация открытия: вращающаяся искра, печатающееся название и надпись «ByFilipp & Claude»
-    local INTRO_T = 2.3
-    local function drawIntro(age)
-        local dl = imgui.GetWindowDrawList()
-        local p, sz = imgui.GetWindowPos(), imgui.GetWindowSize()
-        local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
-        local function col(r, g, b, a) return imgui.ColorConvertFloat4ToU32(imgui.ImVec4(r, g, b, a)) end
-        local k = math.min(1, age / 0.7)
-        local ease = 1 - (1 - k) ^ 3
-        local fade = age > INTRO_T - 0.45 and math.max(0, (INTRO_T - age) / 0.45) or 1
-        local a = ease * fade
-        local cx, cy = p.x + sz.x / 2, p.y + sz.y / 2 - fs * 2.2
-        local R = fs * 3.4 * ease
-        for i = 0, 15 do
-            local ang = age * 1.6 + i * math.pi / 8
-            local len = R * (i % 2 == 0 and 1 or 0.55) * (0.85 + 0.15 * math.sin(age * 5 + i))
-            dl:AddLine(V2(cx, cy), V2(cx + math.cos(ang) * len, cy + math.sin(ang) * len), col(ar, ag, ab, a * 0.9), 3)
-        end
-        dl:AddCircleFilled(V2(cx, cy), fs * 0.7 * ease, col(1, 1, 1, a), 24)
-        dl:AddCircle(V2(cx, cy), R * 1.12, col(ar, ag, ab, a * 0.35), 48, 2)
-        local function centered(str, y, c, big)
-            if big then pcall(imgui.SetWindowFontScale, 1.45) end
-            local w = imgui.CalcTextSize(U(str)).x
-            imgui.SetCursorPos(V2((sz.x - w) / 2, y))
-            imgui.TextColored(c, U(str))
-            if big then pcall(imgui.SetWindowFontScale, 1) end
-        end
-        local full = "FilippHelper"
-        local n = math.max(0, math.min(#full, math.floor((age - 0.35) / 0.08)))
-        centered(full:sub(1, n), sz.y / 2 + fs * 1.8, imgui.ImVec4(1, 1, 1, fade), true)
-        local sa = math.max(0, math.min(1, (age - 1.1) / 0.5)) * fade
-        centered("by ByFilipp  &  Claude", sz.y / 2 + fs * 4.4, imgui.ImVec4(ar, ag, ab, sa), false)
-        -- полоса загрузки
-        local bw, by = sz.x * 0.28, p.y + sz.y / 2 + fs * 6.6
-        local bx = cx - bw / 2
-        dl:AddRectFilled(V2(bx, by), V2(bx + bw, by + 4), col(1, 1, 1, 0.12 * fade), 2)
-        dl:AddRectFilled(V2(bx, by), V2(bx + bw * math.min(1, age / (INTRO_T - 0.4)), by + 4), col(ar, ag, ab, 0.9 * fade), 2)
     end
 
     imgui.OnInitialize(function()
@@ -3010,73 +2907,7 @@ local function setupGui()
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
-    -- овальное уведомление о новом репорте (низ экрана по центру, цвет от акцента /fh)
-    local REP_T = 6
-    imgui.OnFrame(function()
-        if G.rep and (os.clock() - G.rep.t0 >= REP_T) then G.rep = nil end
-        local on = G.rep ~= nil and cfg.reptoast and not G.disabled and not G.initFailed and not G.noRepToast and guiAllowed()
-        G.toastOn = on and true or false
-        GUARD.set(G.mainOn == true or G.toastOn)
-        return on
-    end, function(self)
-        self.HideCursor = true
-        local r = G.rep
-        local age = os.clock() - r.t0
-        local slide = 1 - (1 - math.min(1, age / 0.45)) ^ 3
-        local fade = age > REP_T - 0.6 and math.max(0, (REP_T - age) / 0.6) or 1
-        local w = math.min(sw * 0.92, fs * 38)
-        local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
-        local flags = 0
-        pcall(function()
-            local F = imgui.WindowFlags
-            flags = F.NoTitleBar + F.NoResize + F.NoMove + F.NoInputs + F.NoScrollbar + F.AlwaysAutoResize + F.NoSavedSettings
-        end)
-        imgui.SetNextWindowPos(V2(sw / 2, sh - fs * 3.5 + (1 - slide) * fs * 4), imgui.Cond.Always, V2(0.5, 1))
-        imgui.SetNextWindowSize(V2(w, 0), imgui.Cond.Always)
-        local nVar, nCol = 0, 0
-        local function pushVar(name, v) if pcall(function() imgui.PushStyleVar(imgui.StyleVar[name], v) end) then nVar = nVar + 1 end end
-        local function pushCol(name, c) if pcall(function() imgui.PushStyleColor(imgui.Col[name], c) end) then nCol = nCol + 1 end end
-        pushVar("Alpha", fade)
-        pushVar("WindowRounding", fs * 2.2)
-        pushVar("WindowBorderSize", 2)
-        pushVar("WindowPadding", V2(fs * 1.6, fs * 0.9))
-        pushCol("WindowBg", imgui.ImVec4(ar * 0.22, ag * 0.22, ab * 0.22, 0.94))
-        pushCol("Border", imgui.ImVec4(ar, ag, ab, 0.9))
-        local began = imgui.Begin("##fhreptoast", nil, flags)
-        if began then
-            local ok, err = pcall(function()
-                local dl = imgui.GetWindowDrawList()
-                local p = imgui.GetWindowPos()
-                dl:AddCircleFilled(V2(p.x + fs * 0.9, p.y + fs * 1.1), fs * 0.35 * (1 + 0.25 * math.sin(age * 8)),
-                    imgui.ColorConvertFloat4ToU32(imgui.ImVec4(ar, ag, ab, 1)), 20)
-                local head = "Репорт от " .. r.name .. "[" .. r.id .. "]"
-                if r.more > 0 then head = head .. "  (+" .. r.more .. ")" end
-                bigText(head, imgui.ImVec4(math.min(1, ar + 0.35), math.min(1, ag + 0.35), math.min(1, ab + 0.35), 1))
-                imgui.PushTextWrapPos(w - fs * 3.2)
-                local bigBody = G.big and pcall(imgui.PushFont, G.big)
-                if not bigBody then pcall(imgui.SetWindowFontScale, 1.35) end
-                imgui.TextColored(imgui.ImVec4(1, 1, 1, 1), U(r.text))
-                if bigBody then imgui.PopFont() else pcall(imgui.SetWindowFontScale, 1) end
-                imgui.PopTextWrapPos()
-            end)
-            if not ok then
-                G.noRepToast, G.repErr = true, tostring(err)
-                print("[FH] report toast disabled: " .. tostring(err))
-                fmsg("Уведомление о репорте отключено из-за ошибки: " .. tostring(err):sub(1, 90))
-            end
-        end
-        imgui.End()
-        if nCol > 0 then imgui.PopStyleColor(nCol) end
-        if nVar > 0 then imgui.PopStyleVar(nVar) end
-    end)
-
-    function G.reportToast(rep)
-        local text = rep.text or ""
-        if #text > 220 then text = text:sub(1, 217) .. "..." end
-        local more = (G.rep and (os.clock() - G.rep.t0) < REP_T) and (G.rep.more + 1) or 0
-        G.rep = { name = rep.name, id = rep.id, text = text, t0 = os.clock(), more = more }
-        return cfg.reptoast and not G.noRepToast and not G.disabled and not G.initFailed
-    end
+    function G.reportToast() return false end
 
     function G.diag()
         return { toast = cfg.reptoast, off = G.noRepToast, err = G.repErr, disabled = G.disabled, init = G.initFailed }
@@ -3093,24 +2924,7 @@ local function setupGui()
         imgui.SetNextWindowSize(V2(fs * 50, fs * 30), imgui.Cond.FirstUseEver)
         imgui.SetNextWindowPos(V2(sw / 2, sh / 2), imgui.Cond.FirstUseEver, V2(0.5, 0.5))
         if imgui.Begin("FilippHelper##fh", G.show, imgui.WindowFlags.NoCollapse) then
-            drawGlass()
-            if not G.t0 then G.t0 = os.clock() end
-            local age = os.clock() - G.t0
-            if cfg.intro and not cfg.introDone and not G.noIntro and age < INTRO_T then
-                local okI, errI = pcall(drawIntro, age)
-                if not okI then
-                    G.noIntro = true
-                    print("[FH] intro disabled: " .. tostring(errI))
-                end
-                local okC, clicked = pcall(imgui.IsMouseClicked, 0)
-                if okC and clicked then G.t0 = os.clock() - INTRO_T end
-            else
-                if cfg.intro and not cfg.introDone then   -- первый показ закончился: больше не повторяем
-                    cfg.introDone = true
-                    post(saveCfg)
-                end
-                guarded(drawBody)
-            end
+            guarded(drawBody)
         end
         imgui.End()
     end)
@@ -3138,8 +2952,7 @@ local function onServerMessageImpl(color, text)
     body = body:gsub("%s*|%s*Уже%s*%d+%s*репорт[^|]*$", "")
 
     table.insert(reports, 1, { name = name, id = id, text = body })
-    pcall(function() if guiState and guiState.ready() then guiState.reportToast(reports[1]) end end)
-    if cfg.reptoast and not (guiState and guiState.ready()) then
+    if cfg.reptoast then
         fmsg("{FFFF00}Репорт от " .. name .. "[" .. id .. "]: {FFFFFF}" .. body)
     end
     if #reports > MAX_REPORTS then table.remove(reports) end
