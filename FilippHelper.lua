@@ -428,7 +428,6 @@ local cfg = {
     bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
     alpha = 0.97,                   -- прозрачность фона
     glass = true,                   -- стиль Liquid Glass (стекло)
-    tagmode = 0,                    -- метка над игроком: 0 - imgui, 1 - render (запасной)
     autoupd = true,                 -- проверять обновления при запуске
     reptoast = true,                -- овальное уведомление о репорте
     intro = true,                   -- анимация открытия окна (только при первом запуске)
@@ -459,7 +458,7 @@ local function saveCfg()
         f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
-        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "tagmode=", tostring(cfg.tagmode), "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "reptoast=", cfg.reptoast and "1" or "0", "\r\n", "introdone=", cfg.introDone and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
+        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "reptoast=", cfg.reptoast and "1" or "0", "\r\n", "introdone=", cfg.introDone and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
         f:write("aiurl=", cfg.aiUrl, "\r\n", "aikey=", cfg.aiKey, "\r\n", "aimodel=", cfg.aiModel, "\r\n")
         f:write("aiprompt=", (cfg.aiPrompt:gsub("[\r\n]+", " ")), "\r\n")
         f:close()
@@ -476,7 +475,6 @@ local function loadCfg()
             if k == "automp" then cfg.automp = (v == "1")
             elseif k == "glass" then cfg.glass = (v == "1")
             elseif k == "lite" then cfg.lite = (v == "1")
-            elseif k == "tagmode" then cfg.tagmode = (tonumber(v) == 1) and 1 or 0
             elseif k == "intro" then cfg.intro = (v == "1")
             elseif k == "reptoast" then cfg.reptoast = (v == "1")
             elseif k == "introdone" then cfg.introDone = (v == "1")
@@ -1916,8 +1914,6 @@ local function registerExtra(reg)
         local g = guiState and guiState.diag()
         fmsg("Кодировка: " .. (enc8 and "библиотека encoding" or "запасная (encoding не найдена)"))
         fmsg("Окно /fh: " .. (g and (g.disabled and "отключено из-за ошибок" or g.init and "не запустилось" or "готово") or "недоступно (нет mimgui)"))
-        local ti = guiState and guiState.tagInfo()
-        fmsg("Метка над игроком: " .. (ti and ((ti.off and ("ошибка: " .. tostring(ti.err))) or ("способ " .. (ti.mode == 0 and "imgui" or "render") .. (ti.id and (", игрок найден (ID " .. ti.id .. ")") or ", игрок не найден"))) or "недоступна"))
         fmsg("Уведомление о репорте: " .. (not cfg.reptoast and "выключено в настройках" or (g and g.off) and ("сломалось: " .. tostring(g.err)) or "включено") ..
             ". Репортов получено: " .. #reports)
     end)
@@ -2067,7 +2063,6 @@ local MENU_ROWS = {
     { "#", "Репорты" },
     { "/reports", "последние 15 репортов, быстрый ответ" },
     { "/rpl", "обновить список репортов из /define" },
-    { "/tagmode", "переключить способ рисования метки над игроком (если не видна)" },
     { "/rr [ID] текст", "ответить игроку через /pm" },
     { "/reptest  /fhdiag", "проверка овального уведомления о репорте; диагностика кодировки и окна" },
     { "/fhupd [install]", "проверка обновлений на GitHub; install - скачать и установить" },
@@ -2978,105 +2973,6 @@ local function setupGui()
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
-    -- метка «крутой разраб скрипта» над головой игрока Filipp_Evans (всегда включена,
-    -- видна всем, у кого стоит скрипт). Рисуется через imgui; запасной способ - render-функции MoonLoader (/tagmode).
-    local DEV_NICK, DEV_TEXT = "Filipp_Evans", "ByFilipp"
-    local devState = { id = nil, t = -10 }
-    local function devScreenPos()
-        -- пока SAMP не подключён к серверу, его функции вызывать нельзя (исключение в опкоде)
-        if isSampAvailable and not isSampAvailable() then return end
-        if sampGetGamestate then
-            local okG, gs = pcall(sampGetGamestate)
-            if not okG or gs ~= 3 then return end
-        end
-        local now = os.clock()
-        local okMe, myId = sampGetPlayerIdByCharHandle(PLAYER_PED)
-        if now - devState.t > 2 then          -- раз в 2 секунды ищем нужного игрока
-            devState.t, devState.id = now, nil
-            if okMe and sampGetPlayerNickname(myId) == DEV_NICK then devState.id = myId
-            else
-                for id = 0, sampGetMaxPlayerId(false) do
-                    if sampIsPlayerConnected(id) and sampGetPlayerNickname(id) == DEV_NICK then devState.id = id break end
-                end
-            end
-        end
-        local id = devState.id
-        if not id then return end
-        local ped = PLAYER_PED
-        if not (okMe and id == myId) then
-            local okP, h = sampGetCharHandleBySampPlayerId(id)
-            if not okP then return end
-            ped = h
-        end
-        if not doesCharExist(ped) then return end
-        local x, y, z = getCharCoordinates(ped)
-        local px, py, pz = getCharCoordinates(PLAYER_PED)
-        local dx, dy, dz = x - px, y - py, z - pz
-        if dx * dx + dy * dy + dz * dz > 70 * 70 then return end
-        if isPointOnScreen and not isPointOnScreen(x, y, z + 1.4, 1) then return end
-        local sx, sy = convert3DCoordsToScreen(x, y, z + 1.45)
-        if not sx or sx < 0 or sy < 0 or sx > sw or sy > sh then return end
-        return sx, sy
-    end
-
-    imgui.OnFrame(function() return cfg.tagmode == 0 and not G.noTag and not G.disabled and not G.initFailed end, function(self)
-        self.HideCursor = true
-        if G.tagPause and os.clock() < G.tagPause then return end
-        local ok, err = pcall(function()
-            local sx, sy = devScreenPos()
-            if not sx then return end
-            G.tagFails = 0
-            local dl = (imgui.GetBackgroundDrawList or imgui.GetForegroundDrawList)()
-            local t = os.clock()
-            local txt = DEV_TEXT
-            local total = imgui.CalcTextSize(txt).x
-            local x = sx - total / 2
-            local y = sy - fs * 1.6
-            for i = 1, #txt do
-                local ch = txt:sub(i, i)
-                local k = 0.5 + 0.5 * math.sin(t * 3 - i * 0.7)          -- бегущая волна яркости
-                local col = imgui.ColorConvertFloat4ToU32(imgui.ImVec4(0.1 + 0.25 * k, 0.55 + 0.45 * k, 0.2 + 0.2 * k, 1))
-                local shadow = imgui.ColorConvertFloat4ToU32(imgui.ImVec4(0, 0, 0, 0.8))
-                dl:AddText(V2(x + 1, y + 1), shadow, ch)
-                dl:AddText(V2(x, y), col, ch)
-                x = x + imgui.CalcTextSize(ch).x
-            end
-        end)
-        if not ok then
-            -- ошибка не должна убивать скрипт: в чат из кадра не пишем, делаем паузу и пробуем снова
-            G.tagErr = tostring(err)
-            G.tagFails = (G.tagFails or 0) + 1
-            G.tagPause = os.clock() + 8
-            print("[FH] dev tag error: " .. tostring(err))
-            if G.tagFails >= 6 then G.noTag, cfg.tagmode = true, 1 end
-        end
-    end)
-
-    -- запасной способ: render-функции MoonLoader (если есть), рисует независимо от imgui
-    if renderCreateFont and renderFontDrawText then
-        lua_thread.create(function()
-            local font = renderCreateFont("Arial", 10, 5)
-            local text = toGame(DEV_TEXT)
-            while true do
-                if cfg.tagmode == 1 then
-                    wait(0)
-                    local ok, sx, sy = pcall(devScreenPos)
-                    if ok and sx then
-                        pcall(function()
-                            local w = renderGetFontDrawTextLength(font, text)
-                            local k = 0.5 + 0.5 * math.sin(os.clock() * 3)
-                            renderFontDrawText(font, text, sx - w / 2, sy - 24, 0xFF000000 + math.floor(140 + 115 * k) * 256 + math.floor(40 + 40 * k))
-                        end)
-                    end
-                else
-                    wait(300)
-                end
-            end
-        end)
-    end
-
-    function G.tagInfo() return { id = devState.id, mode = cfg.tagmode, off = G.noTag, err = G.tagErr } end
-
     -- овальное уведомление о новом репорте (низ экрана по центру, цвет от акцента /fh)
     local REP_T = 6
     imgui.OnFrame(function()
@@ -3299,11 +3195,6 @@ local function registerCommands(reg)
     end)
     reg("reports", uiReports)
     reg("rpl", function() DEF.refresh() end)
-    reg("tagmode", function()
-        cfg.tagmode = (cfg.tagmode == 0) and 1 or 0
-        saveCfg()
-        fmsg("Метка над игроком: способ " .. (cfg.tagmode == 0 and "imgui (основной)" or "render (запасной)") .. ".")
-    end)
     reg("fcmd", uiMenu)
     reg("gw", function(p) gwStart(p, false) end)
     reg("gwlast", function(p) gwStart(p, true) end)
