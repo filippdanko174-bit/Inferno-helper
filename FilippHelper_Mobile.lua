@@ -80,6 +80,17 @@ function PUN.note(raw)
     end
 end
 
+-- ответ на диалог только если он реально открыт (ответ на закрытый диалог может уронить игру)
+local function dlgReply(id, btn, list, input)
+    if sampIsDialogActive and sampGetCurrentDialogId then
+        local ok, act = pcall(sampIsDialogActive)
+        if not ok or not act then return end
+        local ok2, cur = pcall(sampGetCurrentDialogId)
+        if not ok2 or cur ~= id then return end
+    end
+    pcall(sampSendDialogResponse, id, btn, list, input or "")
+end
+
 local function safeSend(text)
     PUN.note(text)
     text = toGame(tostring(text or "")):gsub("%c", " ")
@@ -454,7 +465,7 @@ end
 ----------------------------------------------------------------------
 local LITE_DEFAULT = true    -- на телефоне по умолчанию лёгкий режим
 local cfg = {
-    automp = true,                  -- после анонса МП вводить /mp и нажимать 1-ю строку
+    automp = false,                 -- после анонса МП вводить /mp и нажимать 1-ю строку
     accent = { 0.26, 0.62, 0.96 },  -- цвет акцента окна
     bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
     alpha = 0.97,                   -- прозрачность фона
@@ -687,7 +698,7 @@ function ev.onShowDialog(id, style, title, b1, b2, text)
     autoMp.armed = false
     lua_thread.create(function()
         wait(150)
-        pcall(sampSendDialogResponse, id, 1, 0, "")
+        dlgReply(id, 1, 0, "")
     end)
     return false
 end
