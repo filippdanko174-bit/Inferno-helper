@@ -95,7 +95,15 @@ for n, e in pairs(SCAN) do w("scan " .. n .. ": " .. table.concat(e.flags, " "))
 local okEv, ev = pcall(require, "samp.events")
 if not okEv then okEv, ev = pcall(require, "lib.samp.events") end
 local function cut(s, n) s = tostring(s):gsub("[%c]", " ") return #s > n and s:sub(1, n) .. "..." or s end
-local function hook(name, f) if okEv and ev then ev[name] = function(...) pcall(f, ...) end end end
+local HOOKS = {}
+local function hook(name, f)   -- несколько обработчиков на одно событие; ни один не ломает игру
+    if not (okEv and ev) then return end
+    if not HOOKS[name] then
+        HOOKS[name] = {}
+        ev[name] = function(...) for _, h in ipairs(HOOKS[name]) do pcall(h, ...) end end
+    end
+    table.insert(HOOKS[name], f)
+end
 hook("onSendCommand", function(c) w("SEND CMD  " .. cut(c, 90)) end)
 hook("onSendChat", function(c) w("SEND CHAT " .. cut(c, 90)) end)
 hook("onServerMessage", function(col, t) w("RECV MSG  " .. cut(t, 90)) end)
@@ -105,6 +113,35 @@ hook("onSetPlayerPos", function(p) w("RECV SETPOS") end)
 hook("onSendClientJoin", function() w("SEND CLIENT JOIN") end)
 hook("onConnectionRejected", function(r) w("CONNECTION REJECTED " .. tostring(r)) end)
 hook("onSendPlayerSync", function() D.sync = (D.sync or 0) + 1 end)
+
+-- счётчики событий за окно (пишутся в строку RATE раз в 5 с) и ключевые игровые события
+D.cnt = {}
+local function bump(k, n) D.cnt[k] = (D.cnt[k] or 0) + (n or 1) end
+hook("onServerMessage", function() bump("msg") end)
+hook("onShowDialog", function() bump("dlg") end)
+hook("onSendCommand", function() bump("cmdOut") end)
+hook("onPlayerStreamIn", function() bump("streamInPlayers") end)
+hook("onPlayerStreamOut", function() bump("streamOutPlayers") end)
+hook("onVehicleStreamIn", function() bump("streamInVeh") end)
+hook("onCreateObject", function() bump("createObj") end)
+hook("onDestroyObject", function() bump("destroyObj") end)
+hook("onCreate3DText", function() bump("text3d") end)
+hook("onTextDrawSetString", function() bump("tdString") end)
+hook("onShowTextDraw", function() bump("tdShow") end)
+hook("onSetPlayerAttachedObject", function() bump("attach") end)
+hook("onSetPlayerPos", function(p) bump("setpos") w("EVT SETPOS to " .. string.format("%.0f,%.0f,%.0f", p.x or 0, p.y or 0, p.z or 0)) end)
+hook("onSetInterior", function(i) w("EVT INTERIOR " .. tostring(i)) end)
+hook("onTogglePlayerSpectating", function(on) w("EVT SPECTATE " .. tostring(on)) end)
+hook("onSetSpawnInfo", function() w("EVT SPAWNINFO") end)
+hook("onRequestSpawnResponse", function() w("EVT SPAWN RESPONSE") end)
+hook("onSendEnterVehicle", function(id) w("EVT ENTER VEH " .. tostring(id)) end)
+hook("onSendExitVehicle", function(id) w("EVT EXIT VEH " .. tostring(id)) end)
+hook("onSetWeather", function(x) w("EVT WEATHER " .. tostring(x)) end)
+hook("onSetPlayerSkin", function(i, sk) w("EVT SKIN " .. tostring(sk)) end)
+hook("onSetVehicleParamsEx", function() bump("vehParams") end)
+hook("onSendGiveDamage", function() bump("dmgOut") end)
+hook("onResetPlayerWeapons", function() w("EVT RESETWEAPONS") end)
+hook("onSendRequestClass", function() w("EVT REQUEST CLASS") end)
 w("hooks installed: " .. tostring(okEv))
 
 -- минимальное окно mimgui (команда /dtest imgui) - проверяет, падает ли сама отрисовка
@@ -191,6 +228,53 @@ local function analyze()
         elseif last:find("imgui frame", 1, true) or last:find("TEST imgui", 1, true) then add("CRASH_IN_IMGUI", 90, "crash while drawing imgui windows", (#old > 0 and old) or new)
         elseif last:find("SEND DLGR", 1, true) then add("CRASH_ON_DIALOG_RESPONSE", 70, "crash right after a dialog response was sent", whoHas("hook:onSendDialogResponse")) end
     end
+
+    -- 5) данные чёрного ящика
+    local function num(line, key) return tonumber((line or ""):match(key .. "=(%-?[%d%.]+)")) end
+    local lastSnap, lastRate, snaps = nil, nil, {}
+    for _, l in ipairs(prev) do
+        if l:find("] SNAP ", 1, true) then lastSnap = l snaps[#snaps + 1] = l end
+        if l:find("] RATE/5s ", 1, true) then lastRate = l end
+    end
+    if lastSnap then
+        V.notes[#V.notes + 1] = "last snapshot: " .. lastSnap:gsub("^%[%s*[%d%.]+%]%s*", ""):sub(1, 140)
+        local mem = num(lastSnap, "mem")
+        if mem and mem > 700000 then add("LUA_MEMORY_HUGE", 80, string.format("Lua memory %.0f MB before crash (a script leaks memory)", mem / 1024), nil) end
+        if #snaps >= 4 then
+            local m1, m2 = num(snaps[1], "mem"), mem
+            if m1 and m2 and m2 > m1 * 3 and m2 > 200000 then add("LUA_MEMORY_GROWTH", 65, string.format("Lua memory grew %.0f MB -> %.0f MB (leak)", m1 / 1024, m2 / 1024), nil) end
+        end
+        local objs = num(lastSnap, "objs") if objs and objs > 3000 then add("MANY_OBJECTS", 55, "very many streamed objects: " .. objs .. " (draw/streaming overload)", nil) end
+        local ch = num(lastSnap, "chars") if ch and ch > 200 then add("MANY_PEDS", 40, "many peds/players around: " .. ch, nil) end
+        if lastSnap:find("spectating", 1, true) then add("CRASH_WHILE_SPECTATING", 60, "crash while spectating (/re): streaming of the watched player's area", nil) end
+    end
+    if lastRate then
+        local msg = num(lastRate, "msg")
+        if msg and msg > 150 then add("CHAT_FLOOD", 70, "server flooded chat: " .. msg .. " messages in 5 sec before crash; message handlers: ", whoHas("hook:onServerMessage")) end
+        local fps = num(lastRate, "fps")
+        if fps and fps < 10 then add("LOW_FPS", 45, "fps dropped to " .. fps .. " before crash (overload)", nil) end
+        local sin = (num(lastRate, "streamInPlayers") or 0) + (num(lastRate, "streamInVeh") or 0) + (num(lastRate, "createObj") or 0)
+        if sin > 200 then add("STREAM_BURST", 60, "burst of stream-in/object creation (" .. sin .. " in 5 sec) right before crash", nil) end
+    end
+    -- события в последние 4 секунды лога
+    local tail = {}
+    for _, l in ipairs(prev) do
+        local ts = tonumber(l:match("^%[%s*([%d%.]+)%]")) or 0
+        if ts >= lastTs - 4 then tail[#tail + 1] = l end
+    end
+    local function tailHas(pat) for _, l in ipairs(tail) do if l:find(pat, 1, true) then return l end end end
+    if tailHas("EVT SETPOS") then add("CRASH_AFTER_TELEPORT", 65, "crash within 4 sec after a server teleport: " .. tailHas("EVT SETPOS"):sub(12, 70), nil) end
+    if tailHas("EVT INTERIOR") then add("CRASH_AFTER_INTERIOR", 65, "crash within 4 sec after interior change", nil) end
+    if tailHas("EVT SPECTATE") then add("CRASH_AFTER_SPECTATE", 65, "crash within 4 sec after spectate toggle", nil) end
+    if tailHas("EVT SPAWN") or tailHas("EVT REQUEST CLASS") then add("CRASH_AROUND_SPAWN", 60, "crash right around spawn/class selection", nil) end
+    if tailHas("EVT ENTER VEH") or tailHas("EVT EXIT VEH") then add("CRASH_ON_VEHICLE", 55, "crash right after entering/leaving a vehicle", nil) end
+    if tailHas("EVT SKIN") or tailHas("EVT WEATHER") then add("CRASH_ON_SKIN_WEATHER", 40, "crash right after skin/weather change", nil) end
+    if tailHas("SCRIPTS loaded") or tailHas("SCRIPTS gone") then add("SCRIPT_RELOAD", 70, "a script was loaded/unloaded right before crash: " .. (tailHas("SCRIPTS loaded") or tailHas("SCRIPTS gone")):sub(12, 70), nil) end
+    if tailHas("STALL") then add("FREEZE_BEFORE_CRASH", 60, "game froze before crashing (script loop or heavy load)", nil) end
+    local ml2 = tailHas("MLOG ") if ml2 then add("MLOG_NEAR_CRASH", 70, "moonloader.log line near crash: " .. ml2:sub(12, 130), nil) end
+    -- кто может быть причиной по частоте обработки (много хуков на одно событие)
+    local hookers = whoHas("hook:onServerMessage")
+    if #hookers >= 4 then V.notes[#V.notes + 1] = #hookers .. " scripts hook chat messages: " .. table.concat(hookers, ",") end
     -- 4) тихий обрыв: пульс шёл, событий нет - подозрение на скрипты с памятью/ffi
     if joined and #V.causes == 0 then
         local suspects = {}
@@ -261,6 +345,83 @@ local function bisectStep(st, crashedPrev)
     for i = 1, math.floor(#st.suspects / 2) do st.disabled[i] = st.suspects[i] end
     bisectSave(st)
     return "bisect round " .. st.round .. ": disabling " .. table.concat(st.disabled, ",") .. " - play until crash or run /dok if it survived"
+end
+
+
+----------------------------------------------------------------------
+-- ЧЁРНЫЙ ЯЩИК: срез состояния игры каждые 5 с (только безопасные вызовы API, без чтения сырой памяти)
+----------------------------------------------------------------------
+local function cnt(f) local ok, t = pcall(f) return ok and type(t) == "table" and #t or -1 end
+local function blackbox()
+    local p = {}
+    p[#p + 1] = "mem=" .. math.floor(collectgarbage("count")) .. "KB"
+    local ok1, x, y, z = pcall(getCharCoordinates, PLAYER_PED)
+    if ok1 then p[#p + 1] = string.format("pos=%.0f,%.0f,%.0f", x, y, z) end
+    local ok2, int = pcall(getActiveInterior) if ok2 then p[#p + 1] = "int=" .. tostring(int) end
+    local ok3, hp = pcall(getCharHealth, PLAYER_PED) if ok3 then p[#p + 1] = "hp=" .. tostring(hp) end
+    local ok4, car = pcall(isCharInAnyCar, PLAYER_PED)
+    if ok4 and car then
+        local ok5, veh = pcall(storeCarCharIsInNoSave, PLAYER_PED)
+        if ok5 then local ok6, mdl = pcall(getCarModel, veh) p[#p + 1] = "veh=" .. tostring(ok6 and mdl or "?") end
+    else p[#p + 1] = "veh=0" end
+    p[#p + 1] = "chars=" .. cnt(getAllChars) .. " cars=" .. cnt(getAllVehicles) .. " objs=" .. cnt(getAllObjects)
+    local okd, did = pcall(sampGetCurrentDialogId) if okd then p[#p + 1] = "dlgid=" .. tostring(did) end
+    local oks, spec = pcall(sampIsPlayerSpectating) if oks and spec then p[#p + 1] = "spectating" end
+    w("SNAP " .. table.concat(p, " "))
+end
+local function monitorThread()
+    local lastBeat, mlSize = os.clock(), 0
+    local loaded = {}
+    do local okL, list = pcall(function() return script.list() end) if okL and list then for _, sc in ipairs(list) do loaded[tostring(sc.name)] = true end end end
+    local tick = 0
+    while true do
+        local t0 = os.clock()
+        wait(1)   -- ~1 кадр игры
+        local dt = os.clock() - t0
+        D.fpsN = (D.fpsN or 0) + 1
+        if dt > 1.5 then w(string.format("STALL main loop frame took %.1f sec (game freeze)", dt)) end
+        if os.clock() - lastBeat >= 5 then
+            local el = os.clock() - lastBeat
+            lastBeat = os.clock()
+            tick = tick + 1
+            local parts = { string.format("fps=%.0f", (D.fpsN or 0) / el) }
+            D.fpsN = 0
+            for k, v in pairs(D.cnt) do parts[#parts + 1] = k .. "=" .. v end
+            table.sort(parts)
+            w("RATE/5s " .. table.concat(parts, " "))
+            D.cnt = {}
+            blackbox()
+            -- новые строки moonloader.log (ошибки других скриптов в реальном времени)
+            pcall(function()
+                local f = io.open(getWorkingDirectory() .. "/moonloader.log", "rb")
+                if f then
+                    local size = f:seek("end")
+                    if mlSize > 0 and size > mlSize then
+                        f:seek("set", mlSize)
+                        local chunk = f:read(size - mlSize) or ""
+                        for line in chunk:gmatch("[^\r\n]+") do
+                            local low = line:lower()
+                            if low:find("error", 1, true) or low:find("warn", 1, true) or low:find("crash", 1, true) or low:find("exception", 1, true) or low:find("terminat", 1, true) or low:find("unload", 1, true) then
+                                w("MLOG " .. line:sub(1, 150))
+                            end
+                        end
+                    end
+                    mlSize = size
+                    f:close()
+                end
+            end)
+            -- скрипты загружались/выгружались
+            if tick % 2 == 0 then
+                pcall(function()
+                    local cur = {}
+                    for _, sc in ipairs(script.list()) do cur[tostring(sc.name)] = true end
+                    for n in pairs(cur) do if not loaded[n] then w("SCRIPTS loaded: " .. n) end end
+                    for n in pairs(loaded) do if not cur[n] then w("SCRIPTS gone: " .. n) end end
+                    loaded = cur
+                end)
+            end
+        end
+    end
 end
 
 -- сценарии: /dtest otb | chat | dlg | imgui | all
@@ -336,6 +497,7 @@ function main()
         local s3 = bisectLoad()
         if s3.active then os.remove(MARK) chat("round marked as survived: restart the game for the next round") w("bisect: user marked survived") end
     end)
+    lua_thread.create(function() local ok, e = pcall(monitorThread) if not ok then w('monitor died: ' .. tostring(e)) end end)
     local n = 0
     while true do   -- heartbeat: по нему видно, сколько игра прожила до краша
         wait(1000)
