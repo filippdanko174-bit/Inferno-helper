@@ -60,6 +60,37 @@ local function scripts()
 end
 scripts()
 
+-- сканируем исходники других скриптов: какие хуки/библиотеки они используют
+local PATTERNS = {
+    { "onServerMessage", "hook:onServerMessage" }, { "onShowDialog", "hook:onShowDialog" }, { "onSendCommand", "hook:onSendCommand" },
+    { "onSendChat", "hook:onSendChat" }, { "onSendDialogResponse", "hook:onSendDialogResponse" }, { "onSendRpc", "hook:onSendRpc" },
+    { "onReceiveRpc", "hook:onReceiveRpc" }, { "onSendPacket", "hook:onSendPacket" }, { "onReceivePacket", "hook:onReceivePacket" },
+    { "require%s*%(?%s*['\"]imgui['\"]", "lib:imgui(old)" }, { "require%s*%(?%s*['\"]mimgui['\"]", "lib:mimgui" },
+    { "ffi%.cast", "ffi.cast" }, { "memory%.", "memory" }, { "writeMemory", "writeMemory" }, { "callFunction", "callFunction" }, { "sampSendChat", "sampSendChat" },
+    { "setWindowPosition", "winapi" }, { "ffi%.C%.", "ffi.C" },
+}
+local SCAN = {}   -- имя -> { path, flags = {...} }
+local function scanScripts()
+    local ok, list = pcall(function() return script.list() end)
+    if not ok or type(list) ~= "table" then return end
+    for _, sc in ipairs(list) do
+        pcall(function()
+            local name, path = tostring(sc.name), tostring(sc.path)
+            if name == "FH_Diag" then return end
+            local f = io.open(path, "rb")
+            if not f then SCAN[name] = { path = path, flags = {}, nosrc = true } return end
+            local src = f:read(3000000) or "" f:close()
+            local fl = {}
+            for _, p in ipairs(PATTERNS) do if src:find(p[1]) then fl[#fl + 1] = p[2] end end
+            SCAN[name] = { path = path, flags = fl, obj = sc }
+        end)
+    end
+end
+local function has(name, flag) local e = SCAN[name] for _, x in ipairs(e and e.flags or {}) do if x == flag then return true end end end
+local function whoHas(flag) local r = {} for n in pairs(SCAN) do if has(n, flag) then r[#r + 1] = n end end table.sort(r) return r end
+scanScripts()
+for n, e in pairs(SCAN) do w("scan " .. n .. ": " .. table.concat(e.flags, " ")) end
+
 -- хуки SAMP: логируем всё, что приходит и уходит (кратко)
 local okEv, ev = pcall(require, "samp.events")
 if not okEv then okEv, ev = pcall(require, "lib.samp.events") end
@@ -102,6 +133,134 @@ local function snapshot()
     local gs = safe(sampGetGamestate)
     local _, id = pcall(sampGetPlayerIdByCharHandle, PLAYER_PED)
     w(string.format("snapshot: gamestate=%s myid=%s ping=%s", tostring(gs), tostring(id), tostring(safe(function() return sampGetPlayerPing(id) end))))
+end
+
+
+----------------------------------------------------------------------
+-- АВТО-ВЫВОД: анализ лога прошлого запуска + moonloader.log + скан чужих скриптов
+----------------------------------------------------------------------
+local function readLines(p, tailN)
+    local f = io.open(p, "rb")
+    if not f then return {} end
+    local out = {}
+    for l in f:lines() do out[#out + 1] = (l:gsub("\r$", "")) if tailN and #out > tailN then table.remove(out, 1) end end
+    f:close()
+    return out
+end
+local function analyze()
+    local V = { causes = {}, notes = {} }
+    local function add(code, score, text, who) V.causes[#V.causes + 1] = { code = code, score = score, text = text, who = who } end
+    local prev = readLines(PREV)
+    if #prev == 0 then return V, "no previous log" end
+    local ml = readLines(getWorkingDirectory() .. "/moonloader.log", 400)
+
+    -- 1) Lua-ошибки перед крашем (из moonloader.log)
+    for i = #ml, math.max(1, #ml - 60), -1 do
+        local l = ml[i]
+        local sc = l:match("%(error%)%s*([%w_%.%-]+):") or l:match("%[ML%]%s*%(error%)%s*([%w_%.%-]+)")
+        if sc and sc ~= "FH_Diag" then add("LUA_ERROR", 90, "Lua error in script " .. sc .. ": " .. l:sub(1, 120), { sc }) break end
+    end
+    for i = #ml, math.max(1, #ml - 60), -1 do
+        if ml[i]:lower():find("exception", 1, true) or ml[i]:lower():find("access violation", 1, true) then add("EXCEPTION_IN_MLOG", 70, "moonloader.log: " .. ml[i]:sub(1, 120)) break end
+    end
+
+    -- 2) конфликт imgui + mimgui
+    for _, l in ipairs(prev) do if l:find("imgui AND mimgui", 1, true) then add("IMGUI_CONFLICT", 85, "old imgui and mimgui loaded together (known crash source)", whoHas("lib:imgui(old)")) break end end
+    local old, new = whoHas("lib:imgui(old)"), whoHas("lib:mimgui")
+    if #old > 0 and #new > 0 then add("IMGUI_CONFLICT", 80, "scripts use old imgui (" .. table.concat(old, ",") .. ") and mimgui (" .. table.concat(new, ",") .. ")", old) end
+
+    -- 3) что было последним событием
+    local last, lastTs, hbs = nil, 0, 0
+    for _, l in ipairs(prev) do
+        local ts = tonumber(l:match("^%[%s*([%d%.]+)%]")) or 0
+        if ts > 0 then lastTs = ts end
+        if l:find("] hb ", 1, true) then hbs = hbs + 1 end
+        if l:find("] SEND ", 1, true) or l:find("] RECV ", 1, true) or l:find("] TEST ", 1, true) or l:find("imgui frame", 1, true) then last = l end
+    end
+    V.notes[#V.notes + 1] = string.format("prev run lived %.0f sec, last event: %s", lastTs, last and last:sub(1, 90) or "none")
+    local joined = false
+    for _, l in ipairs(prev) do if l:find("connected (gamestate 3)", 1, true) then joined = true end end
+    if not joined then
+        add("CRASH_BEFORE_JOIN", 75, "crash happened before reaching the server (loading or connecting); suspects: scripts loaded at start", nil)
+    end
+    if last then
+        if last:find("TEST send %d begin") and not last:find("returned") then add("CRASH_IN_SENDCHAT", 95, "game died INSIDE sampSendChat (client/sampfuncs/server-side message)", nil)
+        elseif last:find("RECV DLG", 1, true) then add("CRASH_ON_DIALOG", 80, "crash right after a server dialog was shown", whoHas("hook:onShowDialog"))
+        elseif last:find("RECV MSG", 1, true) then add("CRASH_ON_CHAT_MSG", 70, "crash right after a chat message was received; message handlers: ", whoHas("hook:onServerMessage"))
+        elseif last:find("SEND CMD", 1, true) or last:find("SEND CHAT", 1, true) then add("CRASH_ON_COMMAND", 75, "crash right after a command/chat was sent; handlers: ", whoHas("hook:onSendCommand"))
+        elseif last:find("imgui frame", 1, true) or last:find("TEST imgui", 1, true) then add("CRASH_IN_IMGUI", 90, "crash while drawing imgui windows", (#old > 0 and old) or new)
+        elseif last:find("SEND DLGR", 1, true) then add("CRASH_ON_DIALOG_RESPONSE", 70, "crash right after a dialog response was sent", whoHas("hook:onSendDialogResponse")) end
+    end
+    -- 4) тихий обрыв: пульс шёл, событий нет - подозрение на скрипты с памятью/ffi
+    if joined and #V.causes == 0 then
+        local suspects = {}
+        for _, f in ipairs({ "writeMemory", "ffi.cast", "callFunction", "ffi.C", "memory" }) do for _, n in ipairs(whoHas(f)) do suspects[#suspects + 1] = n .. "(" .. f .. ")" end end
+        add("SILENT_CRASH", 50, "game died with no recent events; scripts touching memory/ffi: " .. (#suspects > 0 and table.concat(suspects, ", ") or "none found"), nil)
+    end
+    table.sort(V.causes, function(a, b) return a.score > b.score end)
+    return V
+end
+local function verdictText(V, err)
+    if err then return err end
+    local out = { "=== FH_Diag verdict ===" }
+    for _, n in ipairs(V.notes) do out[#out + 1] = n end
+    if #V.causes == 0 then out[#out + 1] = "no clear cause found; run /dbisect start" end
+    for i, c in ipairs(V.causes) do
+        out[#out + 1] = string.format("%d) [%s %d%%] %s %s", i, c.code, c.score, c.text, c.who and #c.who > 0 and ("-> " .. table.concat(c.who, ", ")) or "")
+    end
+    return table.concat(out, "\n")
+end
+local function showVerdict()
+    local V, err = analyze()
+    local text = verdictText(V, err)
+    local f = io.open(getWorkingDirectory() .. "/FH_Diag_verdict.txt", "wb")
+    if f then f:write((text:gsub("\n", "\r\n"))) f:close() end
+    w(text)
+    for line in text:gmatch("[^\n]+") do chat(line:sub(1, 120)) end
+end
+
+----------------------------------------------------------------------
+-- АВТО-ПОИСК ВИНОВНИКА (bisect): каждый запуск отключаем половину подозреваемых скриптов
+----------------------------------------------------------------------
+local STATE = getWorkingDirectory() .. "/FH_Diag.bisect"
+local function bisectLoad()
+    local st = { active = false, suspects = {}, disabled = {}, round = 0 }
+    for _, l in ipairs(readLines(STATE)) do
+        local k, v = l:match("^(%w+)=(.*)$")
+        if k == "active" then st.active = (v == "1")
+        elseif k == "round" then st.round = tonumber(v) or 0
+        elseif k == "suspects" or k == "disabled" then st[k] = {} for n in v:gmatch("[^,]+") do st[k][#st[k] + 1] = n end end
+    end
+    return st
+end
+local function bisectSave(st)
+    local f = io.open(STATE, "wb")
+    if f then f:write("active=", st.active and "1" or "0", "\r\nround=", st.round, "\r\nsuspects=", table.concat(st.suspects, ","), "\r\ndisabled=", table.concat(st.disabled, ","), "\r\n") f:close() end
+end
+local function unloadList(list)
+    for _, n in ipairs(list) do
+        local e = SCAN[n]
+        if e and e.obj then pcall(function() e.obj:unload() end) w("bisect: unloaded " .. n) end
+    end
+end
+local function bisectStep(st, crashedPrev)
+    -- итог прошлого раунда: упало -> виновник среди НЕОТКЛЮЧЁННЫХ; не упало -> среди отключённых
+    if st.round > 0 then
+        local keep = {}
+        local dis = {} for _, n in ipairs(st.disabled) do dis[n] = true end
+        for _, n in ipairs(st.suspects) do if (crashedPrev and not dis[n]) or (not crashedPrev and dis[n]) then keep[#keep + 1] = n end end
+        if #keep > 0 then st.suspects = keep end
+        w("bisect round " .. st.round .. " result: crashed=" .. tostring(crashedPrev) .. " suspects now: " .. table.concat(st.suspects, ","))
+    end
+    if #st.suspects <= 1 then
+        st.active = false bisectSave(st)
+        return "BISECT RESULT: culprit is most likely '" .. tostring(st.suspects[1]) .. "'"
+    end
+    st.round = st.round + 1
+    st.disabled = {}
+    for i = 1, math.floor(#st.suspects / 2) do st.disabled[i] = st.suspects[i] end
+    bisectSave(st)
+    return "bisect round " .. st.round .. ": disabling " .. table.concat(st.disabled, ",") .. " - play until crash or run /dok if it survived"
 end
 
 -- сценарии: /dtest otb | chat | dlg | imgui | all
@@ -150,24 +309,40 @@ function main()
         end
         chat("report written, see FH_Diag.log / FH_Diag.prev.log")
     end)
-    chat("FH_Diag active. Commands: /dtest chat|dlg|imgui|all, /dreport")
-    if crashed then
-        chat("{FF6666}Previous run ended with a CRASH. Last lines are in FH_Diag.prev.log")
-        local f = io.open(PREV, "rb")
-        if f then
-            local lines = {}
-            for l in f:lines() do lines[#lines + 1] = l end
-            f:close()
-            for i = math.max(1, #lines - 6), #lines do chat(cut(lines[i]:gsub("\r", ""), 110)) end
-        end
-    end
+    chat("FH_Diag active. /dwhy - verdict, /dbisect start|stop, /dok, /dtest chat|dlg|imgui|all")
+    if crashed then chat("{FF6666}Previous run ended with a CRASH. Analysing...") end
     snapshot()
+    if crashed then showVerdict() end
+    local st = bisectLoad()
+    if st.active then
+        local msg = bisectStep(st, crashed)
+        chat(msg) w(msg)
+        unloadList(st.disabled)
+    end
+    sampRegisterChatCommand("dwhy", function() showVerdict() end)
+    sampRegisterChatCommand("dbisect", function(a)
+        a = (a or ""):match("%S+") or ""
+        if a == "start" then
+            local s2 = { active = true, suspects = {}, disabled = {}, round = 0 }
+            for n in pairs(SCAN) do s2.suspects[#s2.suspects + 1] = n end
+            table.sort(s2.suspects)
+            if #s2.suspects < 2 then chat("need at least 2 other scripts to bisect") return end
+            bisectSave(s2)
+            chat("bisect armed over " .. #s2.suspects .. " scripts. Restart the game (reload scripts) and play until crash; after each crash restart again.")
+        elseif a == "stop" then os.remove(STATE) chat("bisect stopped")
+        else chat("usage: /dbisect start | stop") end
+    end)
+    sampRegisterChatCommand("dok", function() -- "в этом раунде не упало"
+        local s3 = bisectLoad()
+        if s3.active then os.remove(MARK) chat("round marked as survived: restart the game for the next round") w("bisect: user marked survived") end
+    end)
     local n = 0
     while true do   -- heartbeat: по нему видно, сколько игра прожила до краша
         wait(1000)
         n = n + 1
         if n % 5 == 0 then w("hb " .. n .. " frames=" .. D.frames .. " sync=" .. tostring(D.sync or 0)) end
         if n % 30 == 0 then snapshot() end
+        if n == 600 then local s4 = bisectLoad() if s4.active then os.remove(MARK) w("bisect: survived 10 min, marked OK") chat("survived 10 min - restart the game for the next bisect round") end end
     end
 end
 
