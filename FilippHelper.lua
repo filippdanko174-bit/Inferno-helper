@@ -1,42 +1,34 @@
--- FilippHelper (FH) -- помощник администратора SA-MP для MoonLoader. Автор: ByFilipp.
--- Версия для ПК (MoonLoader). Файл на ПК должен быть в кодировке Windows-1251 (cp1251).
+
 local okEv, ev = pcall(require, 'samp.events')
 if not okEv then ev = require 'lib.samp.events' end
 
--- @ENC-BEGIN (на ПК файл уже в cp1251, перекодировка не нужна)
 local encOk, encoding = pcall(require, 'encoding')
 local enc8
 if encOk and encoding then
     encoding.default = 'CP1251'
     enc8 = encoding.UTF8
 end
-local GUI_ENCODING_OK = enc8 ~= nil                                     -- для окна mimgui нужна перекодировка в UTF-8
-local function toUi(s) if enc8 then return enc8:encode(s) end return s end    -- cp1251 -> UTF-8
-local function fromUi(s) if enc8 then return enc8:decode(s) end return s end  -- UTF-8 -> cp1251
-local function toGame(s) return s end     -- строка скрипта -> игра
-local function fromGame(s) return s end   -- игра -> строка скрипта
--- @ENC-END
+local GUI_ENCODING_OK = enc8 ~= nil
+local function toUi(s) if enc8 then return enc8:encode(s) end return s end
+local function fromUi(s) if enc8 then return enc8:decode(s) end return s end
+local function toGame(s) return s end
+local function fromGame(s) return s end
 
 local VERSION = "1.1"
-local UPDATE_FILE = "FilippHelper.lua"   -- какой файл скачивать с GitHub при обновлении
-local MAX_CHAT_LEN = 128   -- безопасная длина строки для sampSendChat
-local SEND_GAP = 1100      -- пауза между сообщениями (антифлуд сервера)
+local UPDATE_FILE = "FilippHelper.lua"
+local MAX_CHAT_LEN = 128
+local SEND_GAP = 1100
 local MAX_REPORTS = 15
 
-local watchedId = nil   -- ID игрока из /re
-local reports = {}            -- последние репорты, новые в начале
+local watchedId = nil
+local reports = {}
 
-----------------------------------------------------------------------
--- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-----------------------------------------------------------------------
--- @LOWER-BEGIN
 local LOWER_MAP = {}
 for b = 192, 223 do LOWER_MAP[string.char(b)] = string.char(b + 32) end
-LOWER_MAP[string.char(168)] = string.char(184) -- Ё -> ё
+LOWER_MAP[string.char(168)] = string.char(184)
 local function lower1251(s)
     return (s:lower():gsub("[\192-\223\168]", LOWER_MAP))
 end
--- @LOWER-END
 
 local function trim(s) return s:match("^%s*(.-)%s*$") end
 
@@ -48,7 +40,6 @@ local function safeSend(text)
     if not ok then print("[FH] sampSendChat error: " .. tostring(err)) end
 end
 
--- Отправка списка строк одним потоком с паузами
 local function sendSeq(lines, gap, onDone, startDelay)
     return lua_thread.create(function()
         local ok, err = pcall(function()
@@ -68,15 +59,12 @@ local function fmsg(text)
     sampAddChatMessage("{66CCFF}[FH] {FFFFFF}" .. text, -1)
 end
 
-----------------------------------------------------------------------
--- БИНДЕР: свои команды, создаются прямо в игре (/binder -- справка)
-----------------------------------------------------------------------
 local BIND_MAX, BIND_LINES = 50, 20
-local binds = {}          -- binds[имя] = { delay = мс, lines = { ... } }
+local binds = {}
 local bindFile
 local bindBuiltin, bindReg = {}, nil
 local bindRunning = false
--- имена, которые бинд занимать не должен (серверные/частые команды)
+
 local BIND_RESERVED = {}
 for n in ("a o aad pm re rep report me do b s w g c pay mp setstat ban kick jail mute warn q quit save rcon login register"):gmatch("%S+") do BIND_RESERVED[n] = true end
 
@@ -206,9 +194,6 @@ local function bindDelete(name)
     saveBinds()
 end
 
-----------------------------------------------------------------------
--- ОТДЕЛЬНОЕ ОКНО БИНДЕРА: /fbind (на диалогах SA-MP, работает без imgui)
-----------------------------------------------------------------------
 local D_MAIN, D_NAME, D_ADD, D_BIND, D_LINES, D_DELAY, D_CONF, D_SHOW = 4110, 4111, 4112, 4113, 4114, 4115, 4116, 4117
 local ui = { open = nil, names = {}, sel = nil }
 local uiHandlers = {}
@@ -333,7 +318,6 @@ uiHandlers[D_CONF] = function(button)
     uiBind()
 end
 
--- вызывается из главного цикла
 local function uiTick()
     local id = ui.open
     if id and sampHasDialogRespond(id) then
@@ -407,21 +391,17 @@ local function setupBinder(builtin, reg)
     end)
 end
 
-
-----------------------------------------------------------------------
--- НАСТРОЙКИ, ШАБЛОНЫ ОТВЕТОВ, АВТО-/mp
-----------------------------------------------------------------------
-local LITE_DEFAULT = false   -- на ПК по умолчанию полный стиль
+local LITE_DEFAULT = false
 local cfg = {
-    automp = true,                  -- после анонса МП вводить /mp и нажимать 1-ю строку
-    accent = { 0.26, 0.62, 0.96 },  -- цвет акцента окна
-    bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
-    alpha = 0.97,                   -- прозрачность фона
-    glass = true,                   -- стиль Liquid Glass (стекло)
-    devtag = true,                  -- метка «крутой разраб скрипта» у ника Filipp_Evans
-    autoupd = true,                 -- проверять обновления при запуске
-    intro = true,                   -- анимация открытия окна
-    lite = LITE_DEFAULT,            -- лёгкий режим: без бликов и прозрачности (меньше лагов)
+    automp = true,
+    accent = { 0.26, 0.62, 0.96 },
+    bg = { 0.07, 0.08, 0.10 },
+    alpha = 0.97,
+    glass = true,
+    devtag = true,
+    autoupd = true,
+    intro = true,
+    lite = LITE_DEFAULT,
     aiUrl = "https://api.openai.com/v1/chat/completions",
     aiKey = "",
     aiModel = "gpt-4o-mini",
@@ -482,7 +462,6 @@ local function loadCfg()
     if not ok then print("[FH] settings load error: " .. tostring(err)) end
 end
 
--- Шаблоны ответов на репорты
 local templates = {}
 local TPL_MAX, TPL_LEN = 30, 120
 local DEFAULT_TEMPLATES = {
@@ -529,7 +508,6 @@ local function tplAdd(text)
     return true, "Шаблон добавлен (всего " .. #templates .. ")."
 end
 
--- Авто-/mp: ввести /mp и нажать первую строку открывшегося списка
 local autoMp = { armed = false, t0 = 0 }
 local function armAutoMp(force)
     if not force and not cfg.automp then return end
@@ -540,7 +518,7 @@ end
 function ev.onShowDialog(id, style, title, b1, b2, text)
     if not autoMp.armed then return end
     if os.clock() - autoMp.t0 > 6 then autoMp.armed = false return end
-    if style ~= 2 and style ~= 4 and style ~= 5 then return end   -- только списки
+    if style ~= 2 and style ~= 4 and style ~= 5 then return end
     autoMp.armed = false
     lua_thread.create(function()
         wait(150)
@@ -552,9 +530,6 @@ end
 loadCfg()
 loadTemplates()
 
-----------------------------------------------------------------------
--- РЕПОРТЫ: журнал последних обращений и быстрый ответ
-----------------------------------------------------------------------
 local D_MENU, D_RLIST, D_RREPLY, D_GWSTART = 4120, 4121, 4122, 4123
 
 local function replyTo(id, text)
@@ -564,10 +539,6 @@ local function replyTo(id, text)
     return true
 end
 
-----------------------------------------------------------------------
--- ИИ-ПОДСКАЗКА ОТВЕТА НА РЕПОРТ (любой сервис с OpenAI-совместимым API)
--- Нужны библиотеки effil и requests. Ключ хранится только в config/FilippHelper_settings.txt.
-----------------------------------------------------------------------
 local AI = { busy = false, status = "", result = nil }
 
 function AI.ready() return trim(cfg.aiKey or "") ~= "" and trim(cfg.aiUrl or "") ~= "" end
@@ -577,7 +548,6 @@ local function aiClean(text)
     return trim(text)
 end
 
--- мини-JSON на случай, если в загрузчике нет encodeJson/decodeJson
 local function u8char(cp)
     if cp < 0x80 then return string.char(cp)
     elseif cp < 0x800 then return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64)
@@ -668,8 +638,6 @@ function AI.jsonDecode(s)
     return val()
 end
 
--- отправка POST-запроса; вызывается из потока lua_thread. Возвращает код, текст или nil, ошибка.
--- Перебираем способы: effil+requests (без подвисаний) -> requests -> ssl.https -> curl.
 function AI.http(url, key, body, method)
     method = method or "POST"
     body = body or ""
@@ -751,7 +719,6 @@ function AI.http(url, key, body, method)
     return nil, "нет способа отправить запрос (нужны effil+requests, ssl.https или curl). Команда /aidiag покажет, что есть"
 end
 
--- запрос в отдельном потоке; cb(ok, текст_или_ошибка) вызывается из этого потока
 function AI.ask(system, user, cb)
     if AI.busy then cb(false, "предыдущий запрос ещё идёт") return end
     if not AI.ready() then cb(false, "не заполнены адрес API и ключ (/fh - Настройки или /aiset)") return end
@@ -767,7 +734,7 @@ function AI.ask(system, user, cb)
                 },
             })
             local url = trim(cfg.aiUrl):gsub("/+$", "")
-            if url:match("/v1$") then url = url .. "/chat/completions" end   -- адрес вида .../v1 дополняем сами
+            if url:match("/v1$") then url = url .. "/chat/completions" end
             local code, text = AI.http(url, trim(cfg.aiKey), body)
             if not code then return false, text end
             if code == 0 then return false, "нет связи: " .. tostring(text):sub(1, 80) end
@@ -785,7 +752,6 @@ function AI.ask(system, user, cb)
     end)
 end
 
--- /aidiag: что доступно в загрузчике для запросов к API
 function AI.diag()
     local names = { "effil", "requests", "ssl.https", "ltn12", "socket", "copas", "cjson", "dkjson", "lib.requests" }
     local have, miss = {}, {}
@@ -813,7 +779,6 @@ function AI.test()
     end)
 end
 
--- /ai [ID]: подсказка по репорту, текст попадает в строку ввода как /rr ID текст
 function AI.cmdAsk(p)
     local id = (p or ""):match("^(%d+)")
     local r
@@ -846,10 +811,6 @@ function AI.cmdSet(p)
     fmsg("ИИ: " .. k .. " сохранено.")
 end
 
-----------------------------------------------------------------------
--- ПРОВЕРКА ОБНОВЛЕНИЙ ПО GITHUB
--- В репозитории лежит version.txt: 1-я строка - версия, 2-я - что нового.
-----------------------------------------------------------------------
 local UPD = {
     base = "https://raw.githubusercontent.com/filippdanko174-bit/inferno-helper/main/",
     file = UPDATE_FILE,
@@ -862,7 +823,7 @@ local function verParts(v)
     return t
 end
 
-local function verNewer(a, b)   -- a новее b?
+local function verNewer(a, b)
     local x, y = verParts(a), verParts(b)
     for i = 1, math.max(#x, #y) do
         local p, q = x[i] or 0, y[i] or 0
@@ -871,7 +832,6 @@ local function verNewer(a, b)   -- a новее b?
     return false
 end
 
--- silent: не писать «у вас последняя версия»
 function UPD.check(silent)
     if UPD.busy then return end
     UPD.busy = true
@@ -988,14 +948,10 @@ uiHandlers[D_RREPLY] = function(button, _, input)
     uiReports()
 end
 
-----------------------------------------------------------------------
--- РАЗДАЧА ПРИЗОВ
-----------------------------------------------------------------------
 local gw = { active = false, last = false, word = "", prize = "", stat = nil, amount = nil, t0 = 0 }
 local GW_TAG = "[Раздача]"
 local GW_IGNORE_NAMES = { Admin = true, Utka_News = true }
 
--- {номер статы на сервере, названия приза...}
 local PRIZE_TYPES = {
     { 7,  "bank", "банк", "деньги", "money", "руб" },
     { 1,  "lvl", "лвл", "уровень", "level" },
@@ -1008,7 +964,6 @@ local PRIZE_TYPES = {
     { 14, "kick", "кик" },
 }
 
--- "банк 500.000" -> 7, "500000"; "#9 15" -> 9, "15"; не распознано -> nil
 local function parsePrize(spec)
     local low = lower1251(spec)
     local word, rest = low:match("^(%S+)%s*(.*)$")
@@ -1081,12 +1036,9 @@ uiHandlers[D_GWSTART] = function(button, _, input)
     if button == 1 then gwStart(input, false) end
 end
 
-----------------------------------------------------------------------
--- ЗАНЯТЬ ЗАДАЧУ: "z ..." несколько раз в /a
-----------------------------------------------------------------------
 local D_Z = 4148
 local CLAIM_COUNT = 3
--- {ключ, текст после "z "}
+
 local CLAIMS = {
     { "ao", "aad otbor" }, { "oo", "o otbor" }, { "am", "aad mp" }, { "ar", "aad razdacha" },
     { "sp", "spawn" }, { "on", "o nabor" },
@@ -1113,13 +1065,9 @@ uiHandlers[D_Z] = function(button, list)
     if c then claim(c[2]) end
 end
 
-----------------------------------------------------------------------
--- МЕРОПРИЯТИЯ: готовые анонсы в /aad
-----------------------------------------------------------------------
 local D_EV, D_FR, D_FRACT, D_NOTES, D_NOTE, D_NOTEADD = 4140, 4141, 4142, 4144, 4145, 4146
 local D_EVPRIZE = 4149
 
--- {ключ, название, строки анонса}. {id} подставляется для интерактивных МП.
 local EVENTS = {
     { "svet", "Светофор", "Бежим к финишу на «Зелёный» и замираем на «Красный».", "Кто двинулся на красный - вылетает. Побеждает первый на финише." },
     { "poliv", "Поливалка", "Нужно удержаться на крыше, пока вас поливают из БТР.", "Оружие и толчки запрещены. Побеждает последний оставшийся." },
@@ -1191,10 +1139,6 @@ uiHandlers[D_EVPRIZE] = function(button, _, input)
     announceEvent(e, input or "")
 end
 
-----------------------------------------------------------------------
--- ФРАКЦИИ: наборы, отборы на лидера, временные лидерки
-----------------------------------------------------------------------
--- {ключ, название, id для /templeader, тип}
 local FRACTIONS = {
     { "rus", "Русская мафия", 14, "mafia" }, { "jap", "Японская мафия", 6, "mafia" }, { "ita", "Итальянская мафия", 5, "mafia" },
     { "fun", "Похоронное бюро", 23, "mafia" }, { "out", "Outlaws MC", 28, "mafia" },
@@ -1267,10 +1211,7 @@ uiHandlers[D_FRACT] = function(button, list)
     else uiFractions() end
 end
 
-----------------------------------------------------------------------
--- ШПАРГАЛКИ: свои заметки (правила, ответы), хранятся в файле
-----------------------------------------------------------------------
-local notes = {}   -- { {title=, lines={}}, ... }
+local notes = {}
 local NOTE_MAX, NOTE_LINES = 40, 30
 local notesFile
 
@@ -1379,12 +1320,6 @@ uiHandlers[D_NOTE] = function(button)
     uiNotes()
 end
 
-----------------------------------------------------------------------
--- КОМАНДЫ-СОКРАЩЕНИЯ, ОПРОС, ТАЙМЕР РЕСПАВНА
-----------------------------------------------------------------------
--- {короткое имя, полная команда, режим}
--- args - нужны параметры; idin - вставить "/cmd ID " в строку ввода; idopt - ID из аргумента или из /re;
--- optargs - параметры необязательны; none - без параметров
 local ALIASES = {
     { "jj", "jail", "idin" }, { "mut", "mute", "idin" }, { "ww", "warn", "idin" }, { "bb", "ban", "args" },
     { "uw", "unwarn", "args" }, { "uj", "unjail", "args" }, { "unm", "unmute", "args" }, { "ub", "unban", "args" },
@@ -1427,9 +1362,6 @@ local function cmdAr(id)
     }, SEND_GAP)
 end
 
-----------------------------------------------------------------------
--- ОБЪЯВЛЕНИЯ, ПАМЯТКИ И ПРОВЕРКИ
-----------------------------------------------------------------------
 local D_RULES = 4150
 
 local D_CHK, D_CHKRES = 4151, 4152
@@ -1446,7 +1378,7 @@ local ROLES = {
     { "pgsgh", "ПГС гетто", "Помощник Главного следящего за гетто" },
     { "pgsm", "ПГС мафии", "Помощник Главного следящего за мафиями" },
 }
--- быстрые наборы должностей
+
 local CHK_PRESETS = {
     { "Руководство", { "io", "zo", "po", "ks", "zks" } },
     { "Следящие", { "gsg", "gsgh", "gsm", "zgsg", "zgsgh", "zgsm", "pgsg", "pgsgh", "pgsm" } },
@@ -1457,7 +1389,6 @@ local CHK_PRESETS = {
     { "Все", { "io", "zo", "po", "ks", "zks", "ga", "zga", "gsg", "gsgh", "gsm", "zgsg", "zgsgh", "zgsm", "pgsg", "pgsgh", "pgsm" } },
 }
 
--- ход проверки: кто ответил в /a
 local CHK = { active = false, list = {}, seen = {}, word = "1", t0 = 0, total = 0, secs = 0, thread = nil, token = 0 }
 
 local function chkNames(keys)
@@ -1468,7 +1399,6 @@ local function chkNames(keys)
     return out
 end
 
--- строки объявления в /a (sel - полные названия должностей, пусто - общая проверка)
 local function chkLines(sel, word, secs)
     word = trim(word or "")
     if word == "" then word = "1" end
@@ -1477,7 +1407,7 @@ local function chkLines(sel, word, secs)
     local tail = secs > 0 and (" Время: " .. math.floor(secs) .. " сек.") or ""
     local lines = { "/a Проверка активности администрации!" }
     if sel and #sel > 0 then
-        -- строки собираем по длине в символах (сервер режет сообщение на 128 байтах)
+
         local function clen(x)
             if #"я" == 2 then return #x - select(2, x:gsub("[\128-\191]", "")) end
             return #x
@@ -1519,7 +1449,6 @@ local function chkShow()
 end
 uiHandlers[D_CHKRES] = function() end
 
--- конец проверки; announce - сообщить итог в /a
 local function chkEnd(announce)
     if not CHK.active then fmsg("Проверка не запущена.") return end
     CHK.active = false
@@ -1529,7 +1458,6 @@ local function chkEnd(announce)
     if announce then safeSend(string.format("/a Проверка активности завершена. Отметились: %d.", #CHK.list)) end
 end
 
--- вызывается для каждой строки чата: ищет ответы вида «Ник[ID]: 1»
 local function chkCollect(text)
     if not CHK.active then return end
     local clean = text:gsub("{%x%x%x%x%x%x}", ""):gsub("%c", "")
@@ -1541,7 +1469,6 @@ local function chkCollect(text)
     CHK.list[#CHK.list + 1] = { name = name, id = id, sec = math.floor(os.clock() - CHK.t0) }
 end
 
--- sel: список названий должностей; opts: { word = "1", seconds = 60 }
 local function sayA1(sel, opts)
     opts = opts or {}
     local lines, word, secs = chkLines(sel, opts.word, opts.seconds)
@@ -1570,7 +1497,6 @@ local function roleByToken(tok)
     end
 end
 
--- /a1 [должности] [t=секунд] [w=слово]
 local function sayA1Args(p)
     local sel, bad, opts = {}, {}, {}
     for tok in (p or ""):gmatch("[^%s,]+") do
@@ -1727,7 +1653,7 @@ local INFO = {
     capt = function() showRules("capt") end, biz = function() showRules("biz") end, q = askVopros,
 }
 local vrThread
--- удаление админ-каров всегда с предупреждением в /a и таймером 15 с
+
 local function dvTimer(spawn)
     if vrThread then fmsg("Таймер уже идёт (остановить: /vrstop).") return end
     vrThread = lua_thread.create(function()
@@ -1793,7 +1719,7 @@ local function registerExtra(reg)
         for _, c in ipairs(CLAIMS) do
             if c[1] == lk then claim(c[2], rest) return end
         end
-        claim(p)   -- свой текст: /z o otbor mp
+        claim(p)
     end)
     reg("vr", function() dvTimer(true) end)
     reg("dva", function() dvTimer(false) end)
@@ -1852,9 +1778,6 @@ local function registerExtra(reg)
     loadNotes()
 end
 
-----------------------------------------------------------------------
--- ГЛАВНОЕ МЕНЮ /fh
-----------------------------------------------------------------------
 local D_CMDS, D_CMDPAGE = 4130, 4131
 local CMD_PAGES = {
     { "Раздачи",
@@ -1922,7 +1845,6 @@ uiHandlers[D_CMDPAGE] = function(button)
     if button == 1 then uiCommands() end
 end
 
--- Окно /fh: таблица всех команд
 local function carsDo(kind)
     if kind == "spawn" then safeSend("/spawncars")
     elseif kind == "dv" then dvTimer(false)
@@ -1986,10 +1908,6 @@ end
 
 uiHandlers[D_MENU] = function() end
 
-----------------------------------------------------------------------
--- ОКНО MIMGUI: /fh -- меню слева, страницы справа
--- Если mimgui/шрифт с кириллицей недоступны, /fh откроет обычное диалоговое окно.
-----------------------------------------------------------------------
 local postedActions = {}
 local function post(fn) postedActions[#postedActions + 1] = fn end
 local function runPosted()
@@ -2000,7 +1918,7 @@ local function runPosted()
     end
 end
 
-local guiState   -- заполняется в setupGui; nil, если окно недоступно
+local guiState
 
 local function setupGui()
     if not GUI_ENCODING_OK then return nil end
@@ -2009,7 +1927,6 @@ local function setupGui()
     local okF, ffi = pcall(require, 'ffi')
     if not okF then return nil end
 
-    -- размер экрана и шрифт
     local sw, sh = 1280, 720
     pcall(function() sw, sh = getScreenResolution() end)
     local fs = math.max(14, math.min(26, math.floor(sh / 55)))
@@ -2037,7 +1954,6 @@ local function setupGui()
     local RED = imgui.ImVec4(0.95, 0.40, 0.40, 1)
     local V2 = imgui.ImVec2
 
-    -- буферы ввода
     local function buf(n) return imgui.new.char[n]() end
     local B = {
         gwWord = buf(64), gwPrize = buf(96), reply = buf(512), evId = buf(12),
@@ -2053,7 +1969,7 @@ local function setupGui()
     local introBuf = imgui.new.bool(cfg.intro)
     local tagBuf = imgui.new.bool(cfg.devtag)
     local updBuf = imgui.new.bool(cfg.autoupd)
-    local applyStyle   -- определяется ниже
+    local applyStyle
 
     local function getBuf(b) return fromUi(ffi.string(b)) end
     local function cutUtf8(s, n)
@@ -2081,7 +1997,7 @@ local function setupGui()
         if not c then c = toUi(s) ucache[s] = c end
         return c
     end
-    -- крупный текст (второй шрифт, если удалось загрузить)
+
     local function bigText(s, color)
         local pushed = G.big and pcall(imgui.PushFont, G.big)
         imgui.TextColored(color or ACC, U(s))
@@ -2092,7 +2008,7 @@ local function setupGui()
         if sub then imgui.TextColored(GRAY, U(sub)) end
         imgui.Separator() imgui.Spacing()
     end
-    -- главная кнопка действия: цвет акцента
+
     local function primary(label, size)
         imgui.PushStyleColor(imgui.Col.Button, imgui.ImVec4(cfg.accent[1] * 0.85, cfg.accent[2] * 0.85, cfg.accent[3] * 0.85, 0.85))
         local clicked = imgui.Button(U(label), size)
@@ -2101,9 +2017,6 @@ local function setupGui()
     end
     local function hint(s) imgui.TextColored(GRAY, U(s)) end
 
-    ------------------------------------------------------------------
-    -- страницы
-    ------------------------------------------------------------------
     local pages = {}
 
     pages[1] = { "Команды", function()
@@ -2578,9 +2491,6 @@ local function setupGui()
         end
     end }
 
-    ------------------------------------------------------------------
-    -- окно
-    ------------------------------------------------------------------
     local function guarded(fn)
         local ok, err = pcall(fn)
         if not ok then
@@ -2591,13 +2501,13 @@ local function setupGui()
     end
 
     local function drawBody()
-        -- левое меню
+
         imgui.BeginChild("##side", V2(fs * 10, 0), true)
         guarded(function()
             bigText("FilippHelper", ACC)
             imgui.TextColored(GRAY, U("by ByFilipp  ·  v" .. VERSION))
             imgui.Separator() imgui.Spacing()
-            -- группы меню; настройки всегда в самом низу
+
             local groups = {
                 { "ГЛАВНОЕ", { "Главная", "Проверка", "Репорты", "Раздачи", "Мероприятия" } },
                 { "АДМИНИСТРИРОВАНИЕ", { "Фракции", "Транспорт", "Памятки", "Занять" } },
@@ -2621,7 +2531,7 @@ local function setupGui()
                     if i then drawBtn(i) end
                 end
                 if gi == #groups then
-                    for i, p in ipairs(pages) do   -- страницы, которых нет в группах
+                    for i, p in ipairs(pages) do
                         if not used[i] and p[1] ~= "Настройки" then drawBtn(i) end
                     end
                 end
@@ -2632,7 +2542,7 @@ local function setupGui()
         end)
         imgui.EndChild()
         imgui.SameLine()
-        -- правая часть
+
         imgui.BeginChild("##content", V2(0, 0), true)
         guarded(function() pages[G.page][2]() end)
         imgui.EndChild()
@@ -2647,7 +2557,7 @@ local function setupGui()
         local function lift(v, d) return math.max(0, math.min(1, v + d)) end
         st.WindowPadding, st.FramePadding, st.ItemSpacing = V2(12, 12), V2(8, 6), V2(8, 8)
         if cfg.glass then
-            -- Liquid Glass: полупрозрачные панели, светлые тонкие границы, большие скругления
+
             st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding, st.ScrollbarRounding = 22, 16, 12, 10, 12
             st.WindowBorderSize, st.ChildBorderSize, st.FrameBorderSize = 1, 1, 1
             set("WindowBg", br, bg_, bb, cfg.lite and 1 or cfg.alpha * 0.6)
@@ -2678,7 +2588,6 @@ local function setupGui()
         end
     end
 
-    -- декор стекла: мягкие цветные блики за панелями и световая полоса сверху
     local function drawGlass()
         if not cfg.glass or cfg.lite or G.noDeco then return end
         local ok, err = pcall(function()
@@ -2705,7 +2614,6 @@ local function setupGui()
         end
     end
 
-    -- анимация открытия: вращающаяся искра, печатающееся название и надпись «ByFilipp & Claude»
     local INTRO_T = 2.3
     local function drawIntro(age)
         local dl = imgui.GetWindowDrawList()
@@ -2737,7 +2645,7 @@ local function setupGui()
         centered(full:sub(1, n), sz.y / 2 + fs * 1.8, imgui.ImVec4(1, 1, 1, fade), true)
         local sa = math.max(0, math.min(1, (age - 1.1) / 0.5)) * fade
         centered("by ByFilipp  &  Claude", sz.y / 2 + fs * 4.4, imgui.ImVec4(ar, ag, ab, sa), false)
-        -- полоса загрузки
+
         local bw, by = sz.x * 0.28, p.y + sz.y / 2 + fs * 6.6
         local bx = cx - bw / 2
         dl:AddRectFilled(V2(bx, by), V2(bx + bw, by + 4), col(1, 1, 1, 0.12 * fade), 2)
@@ -2754,7 +2662,6 @@ local function setupGui()
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
-    -- всплывающее уведомление о загрузке (справа сверху)
     local TOAST_T = 6
     imgui.OnFrame(function()
         if G.toastT0 and (os.clock() - G.toastT0 >= TOAST_T) then G.toastT0 = nil end
@@ -2826,9 +2733,6 @@ end
 local okG, gs = pcall(setupGui)
 if okG then guiState = gs else print("[FH] gui setup error: " .. tostring(gs)) end
 
-----------------------------------------------------------------------
--- ОБРАБОТКА СООБЩЕНИЙ СЕРВЕРА
-----------------------------------------------------------------------
 local function onServerMessageImpl(color, text)
     if type(text) ~= "string" then return end
     text = fromGame(text)
@@ -2849,7 +2753,6 @@ local function onServerMessageImpl(color, text)
     end
 end
 
--- метка у ника разработчика (меняется только ваш чат)
 local DEV_NICK = "Filipp_Evans"
 local function devTagText(color, text)
     if not text:find(DEV_NICK, 1, true) or text:find(toGame("разраб скрипта"), 1, true) then return nil end
@@ -2876,9 +2779,6 @@ function ev.onSendCommand(command)
     elseif command:match("^/re%s+off") or command:match("^/reoff") then watchedId = nil end
 end
 
-----------------------------------------------------------------------
--- ЗАПУСК
-----------------------------------------------------------------------
 local function registerCommands(reg)
     registerExtra(reg)
     reg("fh", function()
@@ -2904,7 +2804,6 @@ function main()
     if isSampfuncsLoaded and not isSampfuncsLoaded() then return end
     while isSampAvailable and not isSampAvailable() do wait(100) end
 
-    -- Защитные обёртки: обрезка длины, pcall -- команды и диалоги не должны ронять игру
     local rawAdd, rawDialog, rawReg, rawInput = sampAddChatMessage, sampShowDialog, sampRegisterChatCommand, sampSetChatInputText
     sampAddChatMessage = function(t, c)
         t = toGame(tostring(t or ""))
@@ -2941,7 +2840,7 @@ function main()
     pcall(function() if guiState and guiState.ready() then guiState.notify() end end)
     if cfg.autoupd then
         lua_thread.create(function()
-            wait(15000)   -- не мешаем загрузке игры
+            wait(15000)
             pcall(UPD.check, true)
         end)
     end
