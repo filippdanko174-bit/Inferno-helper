@@ -15,7 +15,6 @@ local function toGame(s) return s end
 local function fromGame(s) return s end
 
 local VERSION = "1.1"
-local UPDATE_FILE = "FilippHelper.lua"
 local MAX_CHAT_LEN = 128
 local SEND_GAP = 1100
 local MAX_REPORTS = 15
@@ -399,7 +398,6 @@ local cfg = {
     alpha = 0.97,
     glass = true,
     devtag = true,
-    autoupd = true,
     intro = true,
     lite = LITE_DEFAULT,
     aiUrl = "https://api.openai.com/v1/chat/completions",
@@ -427,7 +425,7 @@ local function saveCfg()
         f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
-        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "devtag=", cfg.devtag and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
+        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "devtag=", cfg.devtag and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n")
         f:write("aiurl=", cfg.aiUrl, "\r\n", "aikey=", cfg.aiKey, "\r\n", "aimodel=", cfg.aiModel, "\r\n")
         f:write("aiprompt=", (cfg.aiPrompt:gsub("[\r\n]+", " ")), "\r\n")
         f:close()
@@ -446,7 +444,6 @@ local function loadCfg()
             elseif k == "lite" then cfg.lite = (v == "1")
             elseif k == "devtag" then cfg.devtag = (v == "1")
             elseif k == "intro" then cfg.intro = (v == "1")
-            elseif k == "autoupd" then cfg.autoupd = (v == "1")
             elseif k == "aiurl" then cfg.aiUrl = v
             elseif k == "aikey" then cfg.aiKey = v
             elseif k == "aimodel" then cfg.aiModel = v
@@ -809,96 +806,6 @@ function AI.cmdSet(p)
     cfg[f] = v:gsub("[\r\n]+", " ")
     saveCfg()
     fmsg("ИИ: " .. k .. " сохранено.")
-end
-
-local UPD = {
-    base = "https://raw.githubusercontent.com/filippdanko174-bit/inferno-helper/main/",
-    file = UPDATE_FILE,
-    latest = nil, notes = "", checked = false, busy = false, status = "",
-}
-
-local function verParts(v)
-    local t = {}
-    for n in tostring(v):gmatch("%d+") do t[#t + 1] = tonumber(n) end
-    return t
-end
-
-local function verNewer(a, b)
-    local x, y = verParts(a), verParts(b)
-    for i = 1, math.max(#x, #y) do
-        local p, q = x[i] or 0, y[i] or 0
-        if p ~= q then return p > q end
-    end
-    return false
-end
-
-function UPD.check(silent)
-    if UPD.busy then return end
-    UPD.busy = true
-    UPD.status = "Проверяю обновления..."
-    lua_thread.create(function()
-        local ok, code, text = pcall(AI.http, UPD.base .. "version.txt", "", "", "GET")
-        UPD.busy = false
-        if not ok or not code or code ~= 200 or type(text) ~= "string" then
-            UPD.status = "Не удалось проверить обновления."
-            if not silent then fmsg("Не удалось проверить обновления (" .. tostring(ok and (code or text) or code) .. ").") end
-            return
-        end
-        local ver, notes = text:match("^%s*([%d%.]+)[^\n]*\n?(.*)$")
-        if not ver then UPD.status = "Не удалось разобрать version.txt." return end
-        UPD.checked, UPD.latest, UPD.notes = true, ver, trim(fromUi((notes or ""):gsub("[\r\n]+", " ")))
-        if verNewer(ver, VERSION) then
-            UPD.status = "Доступна версия " .. ver
-            fmsg("{FFD700}Доступно обновление {FFFFFF}v" .. ver .. " {A9A9A9}(у вас v" .. VERSION .. ")")
-            if UPD.notes ~= "" then fmsg("{A9A9A9}Что нового: {FFFFFF}" .. UPD.notes) end
-            fmsg("{A9A9A9}Установить: {FFFF00}/fhupd install {A9A9A9}или кнопка в /fh на «Главной»")
-        else
-            UPD.latest = nil
-            UPD.status = "У вас последняя версия (v" .. VERSION .. ")."
-            if not silent then fmsg(UPD.status) end
-        end
-    end)
-end
-
-function UPD.install()
-    if UPD.busy then return end
-    if not UPD.latest then fmsg("Сначала проверьте обновления: /fhupd") return end
-    UPD.busy = true
-    UPD.status = "Скачиваю обновление..."
-    fmsg("Скачиваю v" .. UPD.latest .. "...")
-    lua_thread.create(function()
-        local ok, err = pcall(function()
-            local code, text = AI.http(UPD.base .. UPD.file, "", "", "GET")
-            if code ~= 200 or type(text) ~= "string" then error("ошибка загрузки (" .. tostring(code) .. ")") end
-            if #text < 20000 or not text:find("FilippHelper", 1, true) then error("файл повреждён или неполный") end
-            local chunk, cerr = (loadstring or load)(text)
-            if not chunk then error("файл не компилируется: " .. tostring(cerr)) end
-            local path = thisScript().path
-            local old = io.open(path, "rb")
-            if old then
-                local bak = io.open(path .. ".bak", "wb")
-                if bak then bak:write(old:read("*a")) bak:close() end
-                old:close()
-            end
-            local f = assert(io.open(path, "wb"))
-            f:write(text) f:close()
-        end)
-        UPD.busy = false
-        if ok then
-            UPD.status = "Обновлено до v" .. tostring(UPD.latest) .. ", перезагрузка..."
-            fmsg("{66FF66}Обновлено до v" .. tostring(UPD.latest) .. ". Перезагружаю скрипт...")
-            wait(800)
-            pcall(function() thisScript():reload() end)
-        else
-            UPD.status = "Ошибка обновления: " .. tostring(err)
-            fmsg("{FF6666}Обновление не удалось: " .. tostring(err))
-        end
-    end)
-end
-
-function UPD.cmd(p)
-    p = trim(p or "")
-    if p == "install" then UPD.install() else UPD.check(false) end
 end
 
 local function uiReports()
@@ -1727,7 +1634,6 @@ local function registerExtra(reg)
     reg("ai", function(p) AI.cmdAsk(p) end)
     reg("aiset", function(p) AI.cmdSet(p) end)
     reg("aidiag", function() AI.diag() end)
-    reg("fhupd", function(p) UPD.cmd(p) end)
     reg("chkres", function() INFO.chkres() end)
     reg("chkend", function() INFO.chkend() end)
     reg("a1", function(p) if (p or "") == "" then INFO.a1() else INFO.a1args(p) end end)
@@ -1863,7 +1769,6 @@ local MENU_ROWS = {
     { "#", "Репорты" },
     { "/reports", "последние 15 репортов, быстрый ответ" },
     { "/rr [ID] текст", "ответить игроку через /pm" },
-    { "/fhupd [install]", "проверка обновлений на GitHub; install - скачать и установить" },
     { "/ai [ID]  /aiset  /aidiag", "ИИ-подсказка ответа на репорт; настройка API (/aiset url|key|model|prompt); /aidiag - что доступно для запросов" },
     { "/ar ID", "ответ + текст жалобы в /a" },
     { "/tpl  /rt [ID] N", "шаблоны ответов: список, отправка" },
@@ -1968,7 +1873,6 @@ local function setupGui()
     local liteBuf = imgui.new.bool(cfg.lite)
     local introBuf = imgui.new.bool(cfg.intro)
     local tagBuf = imgui.new.bool(cfg.devtag)
-    local updBuf = imgui.new.bool(cfg.autoupd)
     local applyStyle
 
     local function getBuf(b) return fromUi(ffi.string(b)) end
@@ -2169,13 +2073,6 @@ local function setupGui()
         tile(2, "Авто-/mp", cfg.automp and "вкл" or "выкл", cfg.automp and GREEN or GRAY) imgui.SameLine()
         tile(3, "Проверка активности", active and ("идёт: " .. #CHK.list) or "нет", active and GREEN or GRAY) imgui.SameLine()
         tile(4, "ID из /re", tostring(watchedId or "-"), YEL)
-        if UPD.latest and verNewer(UPD.latest, VERSION) then
-            imgui.BeginChild("##updbanner", V2(0, fs * 3.2), true)
-            imgui.TextColored(YEL, toUi("Доступно обновление v" .. UPD.latest .. " (у вас v" .. VERSION .. ")"))
-            if UPD.notes ~= "" then imgui.SameLine() imgui.TextColored(GRAY, toUi(UPD.notes)) end
-            if primary("Установить обновление##updinst", V2(fs * 14, fs * 1.6)) then post(UPD.install) end
-            imgui.EndChild()
-        end
         imgui.Spacing()
         local bw = V2(fs * 12.5, fs * 2.4)
         local function btn(label, id, fn, same, prim)
@@ -2441,12 +2338,6 @@ local function setupGui()
             post(saveCfg)
         end
         hint("Метка видна только вам (меняется только ваш чат).")
-        if imgui.Checkbox(U("Проверять обновления при запуске"), updBuf) then
-            cfg.autoupd = updBuf[0] and true or false
-            post(saveCfg)
-        end
-        if imgui.Button(U("Проверить обновления сейчас") .. "##updnow", V2(fs * 14, fs * 2)) then post(function() UPD.check(false) end) end
-        if UPD.status ~= "" then imgui.SameLine() imgui.TextColored(GRAY, toUi(UPD.status)) end
         imgui.Spacing() imgui.Separator() imgui.Spacing()
         title("Мероприятия")
         if imgui.Checkbox(U("После анонса МП вводить /mp и нажимать 1-ю строку"), autoBuf) then
@@ -2838,12 +2729,6 @@ function main()
     fmsg("{A9A9A9}Автор: {66CCFF}ByFilipp {A9A9A9}| при участии {66CCFF}Claude {A9A9A9}(Anthropic)")
     fmsg("{A9A9A9}Меню: {FFFF00}/fh {A9A9A9}| команды: {FFFF00}/fcmd {A9A9A9}| поддержка: {FFFF00}@ByFilipp123")
     pcall(function() if guiState and guiState.ready() then guiState.notify() end end)
-    if cfg.autoupd then
-        lua_thread.create(function()
-            wait(15000)
-            pcall(UPD.check, true)
-        end)
-    end
 
     while true do
         wait(100)
