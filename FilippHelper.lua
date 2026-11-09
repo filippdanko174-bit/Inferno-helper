@@ -1,5 +1,5 @@
 -- FilippHelper (FH) -- помощник администратора SA-MP для MoonLoader. Автор: ByFilipp.
--- Файл на ПК должен быть в кодировке Windows-1251 (cp1251).
+-- Версия для ПК (MoonLoader). Файл на ПК должен быть в кодировке Windows-1251 (cp1251).
 local okEv, ev = pcall(require, 'samp.events')
 if not okEv then ev = require 'lib.samp.events' end
 
@@ -40,28 +40,7 @@ end
 
 local function trim(s) return s:match("^%s*(.-)%s*$") end
 
--- Причина наказания: если сервер показывает список причин, выбираем подходящую по нашему тексту
-local PUN = { pending = nil }
-function PUN.note(raw)
-    local kind, reason = tostring(raw or ""):match("^/(%a+)%s+%S+%s+(.+)$")
-    if kind == "mute" or kind == "jail" or kind == "warn" or kind == "ban" then
-        PUN.pending = { reason = reason, t = os.clock() }
-    end
-end
-
--- ответ на диалог только если он реально открыт (ответ на закрытый диалог может уронить игру)
-local function dlgReply(id, btn, list, input)
-    if sampIsDialogActive and sampGetCurrentDialogId then
-        local ok, act = pcall(sampIsDialogActive)
-        if not ok or not act then return end
-        local ok2, cur = pcall(sampGetCurrentDialogId)
-        if not ok2 or cur ~= id then return end
-    end
-    pcall(sampSendDialogResponse, id, btn, list, input or "")
-end
-
 local function safeSend(text)
-    PUN.note(text)
     text = toGame(tostring(text or "")):gsub("%c", " ")
     if text == "" then return end
     if #text > MAX_CHAT_LEN then text = text:sub(1, MAX_CHAT_LEN) end
@@ -434,17 +413,14 @@ end
 ----------------------------------------------------------------------
 local LITE_DEFAULT = false   -- на ПК по умолчанию полный стиль
 local cfg = {
-    automp = false,                 -- после анонса МП вводить /mp и нажимать 1-ю строку
+    automp = true,                  -- после анонса МП вводить /mp и нажимать 1-ю строку
     accent = { 0.26, 0.62, 0.96 },  -- цвет акцента окна
     bg = { 0.07, 0.08, 0.10 },      -- цвет фона окна
     alpha = 0.97,                   -- прозрачность фона
     glass = true,                   -- стиль Liquid Glass (стекло)
+    devtag = true,                  -- метка «крутой разраб скрипта» у ника Filipp_Evans
     autoupd = true,                 -- проверять обновления при запуске
-    safe = false,                   -- безопасный режим: вместо окна /fh диалоги и чат
-    force = false,                  -- принудительно включить окно (/fhgui on)
-    reptoast = true,                -- овальное уведомление о репорте
-    intro = true,                   -- анимация открытия окна (только при первом запуске)
-    introDone = false,              -- анимация уже показана
+    intro = true,                   -- анимация открытия окна
     lite = LITE_DEFAULT,            -- лёгкий режим: без бликов и прозрачности (меньше лагов)
     aiUrl = "https://api.openai.com/v1/chat/completions",
     aiKey = "",
@@ -471,7 +447,7 @@ local function saveCfg()
         f:write(string.format("accent=%.3f,%.3f,%.3f\r\n", cfg.accent[1], cfg.accent[2], cfg.accent[3]))
         f:write(string.format("bg=%.3f,%.3f,%.3f\r\n", cfg.bg[1], cfg.bg[2], cfg.bg[3]))
         f:write(string.format("alpha=%.3f\r\n", cfg.alpha))
-        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "safe=", cfg.safe and "1" or "0", "\r\n", "force=", cfg.force and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "reptoast=", cfg.reptoast and "1" or "0", "\r\n", "introdone=", cfg.introDone and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
+        f:write("glass=", cfg.glass and "1" or "0", "\r\n", "lite=", cfg.lite and "1" or "0", "\r\n", "devtag=", cfg.devtag and "1" or "0", "\r\n", "intro=", cfg.intro and "1" or "0", "\r\n", "autoupd=", cfg.autoupd and "1" or "0", "\r\n")
         f:write("aiurl=", cfg.aiUrl, "\r\n", "aikey=", cfg.aiKey, "\r\n", "aimodel=", cfg.aiModel, "\r\n")
         f:write("aiprompt=", (cfg.aiPrompt:gsub("[\r\n]+", " ")), "\r\n")
         f:close()
@@ -488,11 +464,8 @@ local function loadCfg()
             if k == "automp" then cfg.automp = (v == "1")
             elseif k == "glass" then cfg.glass = (v == "1")
             elseif k == "lite" then cfg.lite = (v == "1")
-            elseif k == "safe" then cfg.safe = (v == "1")
-            elseif k == "force" then cfg.force = (v == "1")
+            elseif k == "devtag" then cfg.devtag = (v == "1")
             elseif k == "intro" then cfg.intro = (v == "1")
-            elseif k == "reptoast" then cfg.reptoast = (v == "1")
-            elseif k == "introdone" then cfg.introDone = (v == "1")
             elseif k == "autoupd" then cfg.autoupd = (v == "1")
             elseif k == "aiurl" then cfg.aiUrl = v
             elseif k == "aikey" then cfg.aiKey = v
@@ -564,148 +537,20 @@ local function armAutoMp(force)
     safeSend("/mp")
 end
 
-----------------------------------------------------------------------
--- СПИСОК РЕПОРТОВ ИЗ /define
--- /rpl (или кнопка в /fh) шлёт /define, перехватывает диалог со списком,
--- разбирает его и заменяет им список репортов. Сам диалог не показывается.
--- Сырой текст диалога сохраняется в config/FilippHelper_define.txt.
-----------------------------------------------------------------------
-local DEF = { waiting = false, t0 = 0, user = nil, token = 0 }
-
-local function defineParse(text)
-    local list = {}
-    for line in (text .. "\n"):gmatch("([^\n]*)\n") do
-        line = line:gsub("{%x%x%x%x%x%x}", ""):gsub("[\t\r]", " ")
-        local name, id, body = line:match("([A-Za-z][A-Za-z0-9_%.]*)%[(%d+)%]%s*[:%-%)]*%s*(.*)")
-        if not name then name, id, body = line:match("([A-Za-z][A-Za-z0-9_%.]*)%s*%((%d+)%)%s*[:%-]*%s*(.*)") end
-        if name and #list < MAX_REPORTS then list[#list + 1] = { name = name, id = id, text = trim(body or "") } end
-    end
-    return list
-end
-
--- вызывается из onShowDialog; ours - диалог вызван нашим запросом (его прячем)
-function DEF.onDialog(id, title, text, ours)
-    DEF.waiting = false
-    pcall(function()
-        local f = io.open(configDir() .. "/FilippHelper_define.txt", "wb")
-        if f then f:write(tostring(title or ""), "\n", tostring(text or "")) f:close() end
-    end)
-    local list = defineParse(fromGame(tostring(text or "")))
-    if #list == 0 then
-        fmsg("Не удалось разобрать /define. Формат записан в config/FilippHelper_define.txt - пришлите этот файл разработчику.")
-    else
-        for i = #reports, 1, -1 do reports[i] = nil end
-        for _, r in ipairs(list) do reports[#reports + 1] = r end
-        fmsg("Список репортов обновлён из /define: " .. #list .. ".")
-    end
-    if ours then
-        lua_thread.create(function() wait(100) pcall(sampSendDialogResponse, id, 0, -1, "") end)
-        return false
-    end
-end
-
-function DEF.refresh()
-    if DEF.waiting then return end
-    DEF.waiting, DEF.t0 = true, os.clock()
-    DEF.token = DEF.token + 1
-    local my = DEF.token
-    safeSend("/define")
-    lua_thread.create(function()
-        wait(5000)
-        if DEF.waiting and DEF.token == my then
-            DEF.waiting = false
-            fmsg("/define не ответил (нет доступа или другой формат).")
-        end
-    end)
-end
-
--- подбирает пункт списка причин от сервера по словам из нашей причины
-function PUN.handle(id, style, text)
-    local p = PUN.pending
-    if not p then return false end
-    if os.clock() - p.t > 12 then PUN.pending = nil return false end
-    if style == 1 then
-        local reasonG = toGame(p.reason)
-        PUN.pending = nil
-        lua_thread.create(function() wait(150) pcall(sampSendDialogResponse, id, 1, 0, reasonG) end)
-        return false
-    end
-    if style ~= 2 and style ~= 4 then return false end
-    local words = {}
-    for w in lower1251(p.reason):gmatch("[^%s%.,!%?%-%(%)%[%]:;\"']+") do
-        if #w >= 6 then words[#words + 1] = w end
-    end
-    if #words == 0 then return false end
-    local best, bestScore, idx = nil, 0, -1
-    local body = fromGame(tostring(text or "")):gsub("{%x%x%x%x%x%x}", "")
-    local i = 0
-    for line in (body .. "\n"):gmatch("([^\n]*)\n") do
-        local low = lower1251(line)
-        local score = 0
-        for _, w in ipairs(words) do if low:find(w, 1, true) then score = score + 1 end end
-        if score > bestScore then best, bestScore, idx = line, score, i end
-        i = i + 1
-    end
-    if not best then return false end
-    PUN.pending = nil
-    lua_thread.create(function() wait(150) pcall(sampSendDialogResponse, id, 1, idx, "") end)
-    fmsg("Причина выбрана: " .. trim(best))
-    return true
-end
-
 function ev.onShowDialog(id, style, title, b1, b2, text)
-    if PUN.pending and PUN.handle(id, style, text) then return false end
-    local ours = DEF.waiting and os.clock() - DEF.t0 < 6
-    if ours or (DEF.user and os.clock() - DEF.user < 3) then
-        DEF.user = nil
-        local okD, res = pcall(DEF.onDialog, id, title, text, ours)
-        if okD and res == false then return false end
-    end
     if not autoMp.armed then return end
     if os.clock() - autoMp.t0 > 6 then autoMp.armed = false return end
     if style ~= 2 and style ~= 4 and style ~= 5 then return end   -- только списки
     autoMp.armed = false
     lua_thread.create(function()
         wait(150)
-        dlgReply(id, 1, 0, "")
+        pcall(sampSendDialogResponse, id, 1, 0, "")
     end)
     return false
 end
 
 loadCfg()
 loadTemplates()
--- Защита от вылетов окна: пока окно или уведомление на экране, лежит файл-метка. Если игра упала,
--- метка остаётся, и при следующем запуске включается безопасный режим (диалоги и чат вместо imgui-окна).
-local GUARD = { on = false, notice = nil, warned = false }
-function GUARD.path() return configDir() .. "/FilippHelper.gui" end
-function GUARD.set(on)
-    if on == GUARD.on then return end
-    GUARD.on = on
-    pcall(function()
-        if on then
-            local f = io.open(GUARD.path(), "wb")
-            if f then f:write("1") f:close() end
-        else
-            os.remove(GUARD.path())
-        end
-    end)
-end
-local function guiAllowed()
-    if cfg.safe then return false end
-    if cfg.force then return true end
-    return not (package.loaded and package.loaded["imgui"])   -- старый imgui в одной игре с mimgui конфликтует
-end
-pcall(function()
-    local f = io.open(GUARD.path(), "rb")
-    if f then
-        f:close()
-        os.remove(GUARD.path())
-        cfg.safe, cfg.force = true, false
-        GUARD.notice = true
-        saveCfg()
-    end
-end)
-
 
 ----------------------------------------------------------------------
 -- РЕПОРТЫ: журнал последних обращений и быстрый ответ
@@ -1957,20 +1802,6 @@ local function registerExtra(reg)
     reg("aiset", function(p) AI.cmdSet(p) end)
     reg("aidiag", function() AI.diag() end)
     reg("fhupd", function(p) UPD.cmd(p) end)
-    reg("fhdiag", function()
-        local g = guiState and guiState.diag()
-        fmsg("Кодировка: " .. (enc8 and "библиотека encoding" or "запасная (encoding не найдена)"))
-        fmsg("Окно /fh: " .. (g and (g.disabled and "отключено из-за ошибок" or g.init and "не запустилось" or "готово") or "недоступно (нет mimgui)"))
-        fmsg("Уведомление о репорте: " .. (not cfg.reptoast and "выключено в настройках" or (g and g.off) and ("сломалось: " .. tostring(g.err)) or "включено") ..
-            ". Репортов получено: " .. #reports)
-    end)
-    reg("reptest", function(p)
-        local text = trim(p or "")
-        if text == "" then text = "Тестовый репорт: проверка уведомления" end
-        local shown = false
-        pcall(function() if guiState and guiState.ready() then shown = guiState.reportToast({ name = "Test_Player", id = "7", text = text }) end end)
-        fmsg(shown and "Тестовое уведомление запущено." or "Уведомление не показано. Подробности: /fhdiag")
-    end)
     reg("chkres", function() INFO.chkres() end)
     reg("chkend", function() INFO.chkend() end)
     reg("a1", function(p) if (p or "") == "" then INFO.a1() else INFO.a1args(p) end end)
@@ -2109,10 +1940,7 @@ local MENU_ROWS = {
     { "/gwstop", "отменить раздачу" },
     { "#", "Репорты" },
     { "/reports", "последние 15 репортов, быстрый ответ" },
-    { "/rpl", "обновить список репортов из /define" },
     { "/rr [ID] текст", "ответить игроку через /pm" },
-    { "/reptest  /fhdiag", "проверка овального уведомления о репорте; диагностика кодировки и окна" },
-    { "/fhgui [on|off]", "окно /fh или безопасный режим (диалоги и чат)" },
     { "/fhupd [install]", "проверка обновлений на GitHub; install - скачать и установить" },
     { "/ai [ID]  /aiset  /aidiag", "ИИ-подсказка ответа на репорт; настройка API (/aiset url|key|model|prompt); /aidiag - что доступно для запросов" },
     { "/ar ID", "ответ + текст жалобы в /a" },
@@ -2214,7 +2042,7 @@ local function setupGui()
     local B = {
         gwWord = buf(64), gwPrize = buf(96), reply = buf(512), evId = buf(12),
         bindName = buf(24), bindText = buf(256), noteTitle = buf(48), noteText = buf(256), tpl = buf(160), claim = buf(64), evPrize = buf(96), chkWord = buf(24), chkSecs = buf(8), search = buf(48),
-        aiUrl = buf(200), aiKey = buf(200), aiModel = buf(64), aiPrompt = buf(700), aiChat = buf(600), modId = buf(48), modTxt = buf(160),
+        aiUrl = buf(200), aiKey = buf(200), aiModel = buf(64), aiPrompt = buf(700),
     }
     local accBuf = imgui.new.float[3](cfg.accent[1], cfg.accent[2], cfg.accent[3])
     local bgBuf = imgui.new.float[3](cfg.bg[1], cfg.bg[2], cfg.bg[3])
@@ -2222,8 +2050,9 @@ local function setupGui()
     local autoBuf = imgui.new.bool(cfg.automp)
     local glassBuf = imgui.new.bool(cfg.glass)
     local liteBuf = imgui.new.bool(cfg.lite)
+    local introBuf = imgui.new.bool(cfg.intro)
+    local tagBuf = imgui.new.bool(cfg.devtag)
     local updBuf = imgui.new.bool(cfg.autoupd)
-    local repBuf = imgui.new.bool(cfg.reptoast)
     local applyStyle   -- определяется ниже
 
     local function getBuf(b) return fromUi(ffi.string(b)) end
@@ -2246,18 +2075,17 @@ local function setupGui()
     local function clearBuf(b) ffi.fill(b, ffi.sizeof(b), 0) end
     local sel = { report = 0, fraction = 0, bind = "", note = 0, roles = {} }
 
-    local ucache, ucount = {}, 0
+    local ucache = {}
     local function U(s)
         local c = ucache[s]
-        if not c then
-            if ucount > 600 then ucache, ucount = {}, 0 end   -- не даём кэшу расти бесконечно
-            c = toUi(s) ucache[s] = c ucount = ucount + 1
-        end
+        if not c then c = toUi(s) ucache[s] = c end
         return c
     end
     -- крупный текст (второй шрифт, если удалось загрузить)
     local function bigText(s, color)
+        local pushed = G.big and pcall(imgui.PushFont, G.big)
         imgui.TextColored(color or ACC, U(s))
+        if pushed then imgui.PopFont() end
     end
     local function title(s, sub)
         bigText(s, ACC)
@@ -2288,7 +2116,7 @@ local function setupGui()
             if r[1] == "#" then
                 head = r[2]
                 if q == "" then imgui.Spacing() imgui.TextColored(ACC, U(r[2])) head = nil end
-            elseif q == "" or (r.l or (function() r.l = lower1251(r[1] .. " " .. r[2]) return r.l end)()):find(q, 1, true) then
+            elseif q == "" or lower1251(r[1]):find(q, 1, true) or lower1251(r[2]):find(q, 1, true) then
                 if head then imgui.Spacing() imgui.TextColored(ACC, U(head)) head = nil end
                 imgui.TextColored(YEL, U(r[1])) imgui.SameLine(fs * 15) imgui.TextWrapped(U(r[2]))
             end
@@ -2323,8 +2151,6 @@ local function setupGui()
 
     pages[3] = { "Репорты", function()
         title("Последние репорты")
-        if imgui.Button(U("Обновить из /define") .. "##rpl", V2(fs * 12, fs * 1.8)) then post(function() DEF.refresh() end) end
-        imgui.SameLine() hint("Список берётся из команды /define (диалог не показывается).")
         if #reports == 0 then
             hint("Репортов пока нет.")
         else
@@ -2356,22 +2182,6 @@ local function setupGui()
                     local rr = r
                     post(function() AI.suggest(rr, function() end) end)
                 end
-                imgui.Spacing()
-                imgui.PushItemWidth(-1) imgui.InputTextWithHint("##rpreason", U("Причина наказания (обязательно)"), B.modTxt, 160) imgui.PopItemWidth()
-                for _, pa in ipairs({ { "Варн", "/warn" }, { "Мут", "/mute" }, { "Джайл", "/jail" }, { "Бан", "/ban" } }) do
-                    if imgui.Button(U(pa[1]) .. "##rp" .. pa[2], V2(fs * 6, fs * 2)) then
-                        local rtx = trim(getBuf(B.modTxt))
-                        if rtx == "" then G.modMsg = "Укажите причину в поле выше."
-                        else
-                            local line = pa[2] .. " " .. r.id .. " " .. rtx
-                            G.modMsg = "Отправлено: " .. line
-                            post(function() safeSend(line) end)
-                        end
-                    end
-                    imgui.SameLine()
-                end
-                imgui.NewLine()
-                if G.modMsg then imgui.TextColored(GRAY, U(G.modMsg)) end
                 if AI.status ~= "" then imgui.TextColored(GRAY, toUi(AI.status)) end
             else hint("Выберите репорт из списка.") end
         end
@@ -2514,10 +2324,8 @@ local function setupGui()
         local secs = tonumber(getBuf(B.chkSecs)) or 0
         imgui.Spacing()
         imgui.TextColored(YEL, U("Что уйдёт в /a:"))
-        local names = selNames()
-        local key = table.concat(names, "|") .. "#" .. word .. "#" .. secs
-        if G.chkKey ~= key then G.chkKey, G.chkPreview = key, (chkLines(names, word, secs)) end
-        for _, l in ipairs(G.chkPreview) do imgui.TextWrapped(U(l)) end
+        local lines = chkLines(selNames(), word, secs)
+        for _, l in ipairs(lines) do imgui.TextWrapped(U(l)) end
         imgui.Spacing()
         local bw = V2(fs * 11, fs * 2.2)
         if primary("Начать проверку##chkgo", bw) then
@@ -2538,77 +2346,6 @@ local function setupGui()
             imgui.SameLine(fs * 16) imgui.TextColored(GRAY, U("через " .. e.sec .. " сек."))
         end
         imgui.EndChild()
-    end }
-
-    pages[14] = { "ИИ", function()
-        title("ИИ-помощник")
-        hint("Спросите что угодно: правила, формулировки, ответ игроку. Ответ появится ниже.")
-        imgui.InputTextMultiline("##aichat", B.aiChat, 600, V2(-1, fs * 4))
-        local bw = V2(fs * 11, fs * 2)
-        if primary("Спросить##aiask", bw) then
-            local q = trim(getBuf(B.aiChat))
-            if q == "" then G.aiMsg = "Напишите вопрос."
-            elseif not AI.ready() then G.aiMsg = "Сначала заполните адрес и ключ API в Настройках."
-            else
-                G.aiMsg = "Думаю..."
-                post(function()
-                    AI.ask("Ты помощник администратора SA-MP сервера. Отвечай кратко, по-русски.", q, function(ok, text)
-                        G.aiMsg = ok and tostring(text) or ("Ошибка: " .. tostring(text))
-                    end)
-                end)
-            end
-        end
-        imgui.SameLine()
-        if imgui.Button(U("Очистить") .. "##aiclr", bw) then ffi.copy(B.aiChat, "") G.aiMsg = nil end
-        imgui.BeginChild("##aians", V2(0, fs * 8), true)
-        imgui.TextWrapped(U(G.aiMsg or "Ответ появится здесь."))
-        imgui.EndChild()
-    end }
-
-    pages[15] = { "Модерация", function()
-        title("Модерация")
-        hint("Укажите ID или ник и текст (причину). Кнопки отправляют команду сразу, как при вводе в чат.")
-        imgui.Text(U("ID / ник")) imgui.SameLine()
-        imgui.PushItemWidth(fs * 12) imgui.InputText("##modid", B.modId, 48) imgui.PopItemWidth()
-        imgui.SameLine() imgui.Text(U("Текст")) imgui.SameLine()
-        imgui.PushItemWidth(-1) imgui.InputText("##modtxt", B.modTxt, 160) imgui.PopItemWidth()
-        local mid, mtx = trim(getBuf(B.modId)), trim(getBuf(B.modTxt))
-        local bw = V2(fs * 9, fs * 2)
-        local ACT = {
-            { "Гетто", "/ghetto", false },
-            { "Склад", "/warehouse", false },
-            { "Цвет банды", "/gzcolor", "text" },
-            { "Варн", "/warn", "idtext" },
-            { "Анварн", "/unwarn", "id" },
-            { "Мут", "/mute", "idtext" },
-            { "Размут", "/unmute", "id" },
-            { "Джайл", "/jail", "idtext" },
-            { "Из джайла", "/unjail", "id" },
-            { "Бан", "/ban", "idtext" },
-            { "Разбан", "/unban", "id" },
-            { "Статистика", "/getstats", "id" },
-            { "Инвентарь", "/checkinv", "id" },
-        }
-        for i, a in ipairs(ACT) do
-            if imgui.Button(U(a[1]) .. "##mod" .. i, bw) then
-                local need = a[3]
-                if (need == "id" or need == "idtext") and mid == "" then
-                    G.modMsg = "Укажите ID или ник."
-                elseif (need == "text" or need == "idtext") and mtx == "" then
-                    G.modMsg = "Заполните поле «Текст»."
-                else
-                    local parts = { a[2] }
-                    if need == "id" or need == "idtext" then parts[#parts + 1] = mid end
-                    if need == "text" or need == "idtext" then parts[#parts + 1] = mtx end
-                    local line = table.concat(parts, " ")
-                    G.modMsg = "Отправлено: " .. line
-                    post(function() safeSend(line) end)
-                end
-            end
-            if i % 4 ~= 0 and i < #ACT then imgui.SameLine() end
-        end
-        imgui.Spacing()
-        if G.modMsg then imgui.TextColored(GRAY, U(G.modMsg)) end
     end }
 
     pages[11] = { "Памятки", function()
@@ -2770,10 +2507,27 @@ local function setupGui()
             applyColors()
         end
         imgui.Spacing()
-        if imgui.Checkbox(U("Сообщение в чат о новом репорте"), repBuf) then
-            cfg.reptoast = repBuf[0] and true or false
+        if imgui.Checkbox(U("Стиль Liquid Glass (стекло)"), glassBuf) then
+            cfg.glass = glassBuf[0] and true or false
+            applyStyle()
             post(saveCfg)
         end
+        hint("Полупрозрачные панели и цветные блики. Прозрачность регулируется ползунком выше.")
+        if imgui.Checkbox(U("Лёгкий режим (если окно лагает)"), liteBuf) then
+            cfg.lite = liteBuf[0] and true or false
+            applyStyle()
+            post(saveCfg)
+        end
+        hint("Убирает блики и прозрачность окна - заметно меньше нагрузка на телефоне.")
+        if imgui.Checkbox(U("Анимация открытия окна"), introBuf) then
+            cfg.intro = introBuf[0] and true or false
+            post(saveCfg)
+        end
+        if imgui.Checkbox(U("Метка «крутой разраб скрипта» у Filipp_Evans в чате"), tagBuf) then
+            cfg.devtag = tagBuf[0] and true or false
+            post(saveCfg)
+        end
+        hint("Метка видна только вам (меняется только ваш чат).")
         if imgui.Checkbox(U("Проверять обновления при запуске"), updBuf) then
             cfg.autoupd = updBuf[0] and true or false
             post(saveCfg)
@@ -2845,10 +2599,9 @@ local function setupGui()
             imgui.Separator() imgui.Spacing()
             -- группы меню; настройки всегда в самом низу
             local groups = {
-                { "ГЛАВНОЕ", { "Главная", "Репорты", "Проверка", "Мероприятия", "Раздачи" } },
-                { "АДМИНИСТРИРОВАНИЕ", { "Занять", "Фракции", "Транспорт", "Памятки" } },
-                { "МОДЕРАЦИЯ", { "Модерация" } },
-                { "ИНСТРУМЕНТЫ", { "ИИ", "Биндер", "Шпаргалки", "Команды" } },
+                { "ГЛАВНОЕ", { "Главная", "Проверка", "Репорты", "Раздачи", "Мероприятия" } },
+                { "АДМИНИСТРИРОВАНИЕ", { "Фракции", "Транспорт", "Памятки", "Занять" } },
+                { "ИНСТРУМЕНТЫ", { "Биндер", "Шпаргалки", "Команды" } },
             }
             local byName, used = {}, {}
             for i, p in ipairs(pages) do byName[p[1]] = i end
@@ -2893,9 +2646,25 @@ local function setupGui()
         local br, bg_, bb = cfg.bg[1], cfg.bg[2], cfg.bg[3]
         local function lift(v, d) return math.max(0, math.min(1, v + d)) end
         st.WindowPadding, st.FramePadding, st.ItemSpacing = V2(12, 12), V2(8, 6), V2(8, 8)
+        if cfg.glass then
+            -- Liquid Glass: полупрозрачные панели, светлые тонкие границы, большие скругления
+            st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding, st.ScrollbarRounding = 22, 16, 12, 10, 12
+            st.WindowBorderSize, st.ChildBorderSize, st.FrameBorderSize = 1, 1, 1
+            set("WindowBg", br, bg_, bb, cfg.lite and 1 or cfg.alpha * 0.6)
+            set("ChildBg", 1, 1, 1, 0.06)
+            set("Border", 1, 1, 1, 0.28)
+            set("Text", 0.96, 0.97, 1.0)
+            set("FrameBg", 1, 1, 1, 0.08) set("FrameBgHovered", 1, 1, 1, 0.15) set("FrameBgActive", 1, 1, 1, 0.20)
+            set("TitleBg", br, bg_, bb, 0.35) set("TitleBgActive", br, bg_, bb, 0.55) set("TitleBgCollapsed", br, bg_, bb, 0.35)
+            set("Button", 1, 1, 1, 0.10) set("ButtonHovered", ar, ag, ab, 0.55) set("ButtonActive", ar, ag, ab, 0.75)
+            set("Header", ar, ag, ab, 0.35) set("HeaderHovered", ar, ag, ab, 0.50) set("HeaderActive", ar, ag, ab, 0.65)
+            set("CheckMark", ar, ag, ab) set("SliderGrab", ar, ag, ab) set("SliderGrabActive", ar * 0.8, ag * 0.8, ab * 0.8)
+            set("Separator", 1, 1, 1, 0.18)
+            set("ScrollbarBg", 0, 0, 0, 0) set("ScrollbarGrab", 1, 1, 1, 0.25)
+        else
             st.WindowRounding, st.ChildRounding, st.FrameRounding, st.GrabRounding, st.ScrollbarRounding = 10, 8, 6, 6, 8
             st.WindowBorderSize, st.ChildBorderSize, st.FrameBorderSize = 1, 1, 0
-            set("WindowBg", br, bg_, bb, cfg.alpha)
+            set("WindowBg", br, bg_, bb, cfg.lite and 1 or cfg.alpha)
             set("ChildBg", lift(br, 0.03), lift(bg_, 0.03), lift(bb, 0.04))
             set("Border", lift(br, 0.13), lift(bg_, 0.14), lift(bb, 0.18)) set("Text", 0.92, 0.93, 0.95)
             set("FrameBg", lift(br, 0.07), lift(bg_, 0.08), lift(bb, 0.10))
@@ -2906,28 +2675,123 @@ local function setupGui()
             set("Header", ar * 0.75, ag * 0.75, ab * 0.75, 0.6) set("HeaderHovered", ar, ag, ab, 0.7) set("HeaderActive", ar, ag, ab)
             set("CheckMark", ar, ag, ab) set("SliderGrab", ar, ag, ab) set("SliderGrabActive", ar * 0.8, ag * 0.8, ab * 0.8)
             set("Separator", lift(br, 0.15), lift(bg_, 0.17), lift(bb, 0.22))
+        end
+    end
+
+    -- декор стекла: мягкие цветные блики за панелями и световая полоса сверху
+    local function drawGlass()
+        if not cfg.glass or cfg.lite or G.noDeco then return end
+        local ok, err = pcall(function()
+            local dl = imgui.GetWindowDrawList()
+            local p, sz = imgui.GetWindowPos(), imgui.GetWindowSize()
+            local w, h = sz.x, sz.y
+            local function col(r, g, b, a) return imgui.ColorConvertFloat4ToU32(imgui.ImVec4(r, g, b, a)) end
+            local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
+            local blobs = {
+                { 0.78, 0.15, ar, ag, ab }, { 0.25, 0.90, ab, ar, ag },
+            }
+            local R = h * 0.35
+            for _, b in ipairs(blobs) do
+                for k = 0, 3 do
+                    dl:AddCircleFilled(V2(p.x + w * b[1], p.y + h * b[2]), R * (1 - k * 0.22), col(b[3], b[4], b[5], 0.05), 48)
+                end
+            end
+            local top, bot = col(1, 1, 1, 0.14), col(1, 1, 1, 0)
+            dl:AddRectFilledMultiColor(V2(p.x + 22, p.y + 2), V2(p.x + w - 22, p.y + h * 0.10), top, top, bot, bot)
+        end)
+        if not ok then
+            G.noDeco = true
+            print("[FH] glass decoration disabled: " .. tostring(err))
+        end
+    end
+
+    -- анимация открытия: вращающаяся искра, печатающееся название и надпись «ByFilipp & Claude»
+    local INTRO_T = 2.3
+    local function drawIntro(age)
+        local dl = imgui.GetWindowDrawList()
+        local p, sz = imgui.GetWindowPos(), imgui.GetWindowSize()
+        local ar, ag, ab = cfg.accent[1], cfg.accent[2], cfg.accent[3]
+        local function col(r, g, b, a) return imgui.ColorConvertFloat4ToU32(imgui.ImVec4(r, g, b, a)) end
+        local k = math.min(1, age / 0.7)
+        local ease = 1 - (1 - k) ^ 3
+        local fade = age > INTRO_T - 0.45 and math.max(0, (INTRO_T - age) / 0.45) or 1
+        local a = ease * fade
+        local cx, cy = p.x + sz.x / 2, p.y + sz.y / 2 - fs * 2.2
+        local R = fs * 3.4 * ease
+        for i = 0, 15 do
+            local ang = age * 1.6 + i * math.pi / 8
+            local len = R * (i % 2 == 0 and 1 or 0.55) * (0.85 + 0.15 * math.sin(age * 5 + i))
+            dl:AddLine(V2(cx, cy), V2(cx + math.cos(ang) * len, cy + math.sin(ang) * len), col(ar, ag, ab, a * 0.9), 3)
+        end
+        dl:AddCircleFilled(V2(cx, cy), fs * 0.7 * ease, col(1, 1, 1, a), 24)
+        dl:AddCircle(V2(cx, cy), R * 1.12, col(ar, ag, ab, a * 0.35), 48, 2)
+        local function centered(str, y, c, big)
+            local pushed = big and G.big and pcall(imgui.PushFont, G.big)
+            local w = imgui.CalcTextSize(U(str)).x
+            imgui.SetCursorPos(V2((sz.x - w) / 2, y))
+            imgui.TextColored(c, U(str))
+            if pushed then imgui.PopFont() end
+        end
+        local full = "FilippHelper"
+        local n = math.max(0, math.min(#full, math.floor((age - 0.35) / 0.08)))
+        centered(full:sub(1, n), sz.y / 2 + fs * 1.8, imgui.ImVec4(1, 1, 1, fade), true)
+        local sa = math.max(0, math.min(1, (age - 1.1) / 0.5)) * fade
+        centered("by ByFilipp  &  Claude", sz.y / 2 + fs * 4.4, imgui.ImVec4(ar, ag, ab, sa), false)
+        -- полоса загрузки
+        local bw, by = sz.x * 0.28, p.y + sz.y / 2 + fs * 6.6
+        local bx = cx - bw / 2
+        dl:AddRectFilled(V2(bx, by), V2(bx + bw, by + 4), col(1, 1, 1, 0.12 * fade), 2)
+        dl:AddRectFilled(V2(bx, by), V2(bx + bw * math.min(1, age / (INTRO_T - 0.4)), by + 4), col(ar, ag, ab, 0.9 * fade), 2)
     end
 
     imgui.OnInitialize(function()
         local ok, err = pcall(function()
             local io = imgui.GetIO()
             io.Fonts:AddFontFromFileTTF(fontPath, fs, nil, io.Fonts:GetGlyphRangesCyrillic())
-            -- второй (большой) шрифт не создаём: лишний атлас шрифтов ронял игру на слабых ПК; крупный текст делаем масштабом
+            pcall(function() G.big = io.Fonts:AddFontFromFileTTF(fontPath, math.floor(fs * 1.45), nil, io.Fonts:GetGlyphRangesCyrillic()) end)
             applyStyle()
         end)
         if not ok then G.initFailed = true print("[FH] gui init error: " .. tostring(err)) end
     end)
 
-    function G.reportToast() return false end
-
-    function G.diag()
-        return { toast = cfg.reptoast, off = G.noRepToast, err = G.repErr, disabled = G.disabled, init = G.initFailed }
-    end
+    -- всплывающее уведомление о загрузке (справа сверху)
+    local TOAST_T = 6
+    imgui.OnFrame(function()
+        if G.toastT0 and (os.clock() - G.toastT0 >= TOAST_T) then G.toastT0 = nil end
+        return G.toastT0 ~= nil and cfg.intro and not G.disabled and not G.initFailed and not G.noToast
+    end, function(self)
+        self.HideCursor = true
+        local age = os.clock() - G.toastT0
+        local slide = 1 - (1 - math.min(1, age / 0.5)) ^ 3
+        local fade = age > TOAST_T - 0.6 and math.max(0, (TOAST_T - age) / 0.6) or 1
+        local w = fs * 22
+        local flags = 0
+        pcall(function()
+            local F = imgui.WindowFlags
+            flags = F.NoTitleBar + F.NoResize + F.NoMove + F.NoInputs + F.NoScrollbar + F.AlwaysAutoResize
+        end)
+        imgui.SetNextWindowPos(V2(sw - (w + fs) * slide, fs * 3), imgui.Cond.Always)
+        imgui.SetNextWindowSize(V2(w, 0), imgui.Cond.Always)
+        local pushed = pcall(function() imgui.PushStyleVar(imgui.StyleVar.Alpha, fade) end)
+        local began = imgui.Begin("##fhtoast", nil, flags)
+        if began then
+            local ok, err = pcall(function()
+                local dl = imgui.GetWindowDrawList()
+                local p, sz = imgui.GetWindowPos(), imgui.GetWindowSize()
+                dl:AddRectFilled(p, V2(p.x + 5, p.y + sz.y), imgui.ColorConvertFloat4ToU32(ACC), 2)
+                bigText("FilippHelper загружен", ACC)
+                imgui.TextColored(GRAY, U("Автор: ByFilipp  ·  при участии Claude"))
+                imgui.TextColored(YEL, U("Меню: /fh   ·   команды: /fcmd"))
+                imgui.TextColored(GRAY, U("Поддержка: @ByFilipp123"))
+            end)
+            if not ok then G.noToast = true print("[FH] toast disabled: " .. tostring(err)) end
+        end
+        imgui.End()
+        if pushed then imgui.PopStyleVar() end
+    end)
 
     imgui.OnFrame(function()
-        local on = G.show[0] and not G.disabled and not G.initFailed and guiAllowed()
-        G.mainOn = on and true or false
-        GUARD.set(G.mainOn or G.toastOn == true)
+        local on = G.show[0] and not G.disabled and not G.initFailed
         if not on then G.t0 = nil end
         return on
     end, function(self)
@@ -2935,13 +2799,27 @@ local function setupGui()
         imgui.SetNextWindowSize(V2(fs * 50, fs * 30), imgui.Cond.FirstUseEver)
         imgui.SetNextWindowPos(V2(sw / 2, sh / 2), imgui.Cond.FirstUseEver, V2(0.5, 0.5))
         if imgui.Begin("FilippHelper##fh", G.show, imgui.WindowFlags.NoCollapse) then
-            guarded(drawBody)
+            drawGlass()
+            if not G.t0 then G.t0 = os.clock() end
+            local age = os.clock() - G.t0
+            if cfg.intro and not G.noIntro and age < INTRO_T then
+                local okI, errI = pcall(drawIntro, age)
+                if not okI then
+                    G.noIntro = true
+                    print("[FH] intro disabled: " .. tostring(errI))
+                end
+                local okC, clicked = pcall(imgui.IsMouseClicked, 0)
+                if okC and clicked then G.t0 = os.clock() - INTRO_T end
+            else
+                guarded(drawBody)
+            end
         end
         imgui.End()
     end)
 
-    function G.ready() return not G.disabled and not G.initFailed and guiAllowed() end
+    function G.ready() return not G.disabled and not G.initFailed end
     function G.toggle() G.show[0] = not G.show[0] end
+    function G.notify() G.toastT0 = os.clock() end
     return G
 end
 
@@ -2963,9 +2841,6 @@ local function onServerMessageImpl(color, text)
     body = body:gsub("%s*|%s*Уже%s*%d+%s*репорт[^|]*$", "")
 
     table.insert(reports, 1, { name = name, id = id, text = body })
-    if cfg.reptoast then
-        fmsg("{FFFF00}Репорт от " .. name .. "[" .. id .. "]: {FFFFFF}" .. body)
-    end
     if #reports > MAX_REPORTS then table.remove(reports) end
 
     if gw.active and not GW_IGNORE_NAMES[name] and not clean:find(GW_TAG, 1, true)
@@ -2974,15 +2849,28 @@ local function onServerMessageImpl(color, text)
     end
 end
 
+-- метка у ника разработчика (меняется только ваш чат)
+local DEV_NICK = "Filipp_Evans"
+local function devTagText(color, text)
+    if not text:find(DEV_NICK, 1, true) or text:find(toGame("разраб скрипта"), 1, true) then return nil end
+    local rgb = math.floor((tonumber(color) or 0) % 4294967296 / 256) % 16777216
+    local tag = toGame(" {FFD700}[Крутой разраб скрипта]{" .. string.format("%06X", rgb) .. "}")
+    local out, n = text:gsub("(" .. DEV_NICK .. "%[?%d*%]?)", "%1" .. tag:gsub("%%", "%%%%"), 1)
+    if n == 0 then return nil end
+    return out
+end
+
 function ev.onServerMessage(color, text)
     local ok, err = pcall(onServerMessageImpl, color, text)
     if not ok then print("[FH] onServerMessage error: " .. tostring(err)) end
+    if cfg.devtag and type(text) == "string" then
+        local okT, newText = pcall(devTagText, color, text)
+        if okT and newText then return { color, newText } end
+    end
 end
 
 function ev.onSendCommand(command)
-    PUN.note(command)
     if type(command) ~= "string" then return end
-    if command:match("^/define") then DEF.user = os.clock() end
     local id = command:match("^/re%s+(%d+)")
     if id then watchedId = id
     elseif command:match("^/re%s+off") or command:match("^/reoff") then watchedId = nil end
@@ -2991,100 +2879,12 @@ end
 ----------------------------------------------------------------------
 -- ЗАПУСК
 ----------------------------------------------------------------------
--- Перенесённые команды модерации и обёртки (своя реализация)
-local function registerPorted(reg)
-    local scThread
-    local function tgt(p)
-        p = trim(p or "")
-        if p ~= "" then return p end
-        return watchedId
-    end
-    -- обёртки над серверными командами
-    reg("gt", function() safeSend("/ghetto") end)
-    reg("wh", function() safeSend("/warehouse") end)
-    reg("cb", function(p) if trim(p or "") ~= "" then safeSend("/warehouse " .. trim(p)) else fmsg("Укажите параметры: /cb [текст]") end end)
-    reg("gc", function(p) if trim(p or "") ~= "" then safeSend("/gzcolor " .. trim(p)) else fmsg("Укажите параметры: /gc [цвет]") end end)
-    reg("sprod", function(p)
-        local a, b = (p or ""):match("(%d+)%s+(%d+)")
-        if a then safeSend("/setbizprod " .. a .. " " .. b) else fmsg("Использование: /sprod [ID бизнеса] [число]") end
-    end)
-    reg("wn", function(p)
-        p = trim(p or "")
-        if p:match("^%d+%s+%S") then safeSend("/warn " .. p)
-        else fmsg("Использование: /wn [ID] [причина]") end
-    end)
-    -- команды с ID: вставляют команду в строку чата (как у Бруно, но ID по умолчанию из /re)
-    local function regId(cmd, sCmd, input)
-        reg(cmd, function(p)
-            local id = tgt(p)
-            if not id then fmsg("Укажите ID: /" .. cmd .. " ID (или сначала /re ID)") return end
-            if input then
-                if sampSetChatInputText then sampSetChatInputText("/" .. sCmd .. " " .. id .. " ") end
-                if sampSetChatInputEnabled then sampSetChatInputEnabled(true) end
-            else
-                safeSend("/" .. sCmd .. " " .. id)
-            end
-        end)
-    end
-    regId("jl", "jail", true) regId("mt", "mute", true)
-    regId("as", "getstats", false) regId("ci", "checkinv", false)
-    -- снятие и бан
-    local function regArg(cmd, sCmd)
-        reg(cmd, function(p)
-            p = trim(p or "")
-            if p ~= "" then safeSend("/" .. sCmd .. " " .. p) else fmsg("Использование: /" .. cmd .. " [ID или ник]") end
-        end)
-    end
-    regArg("uwn", "unwarn") regArg("ujl", "unjail") regArg("um", "unmute") regArg("bn", "ban") regArg("ubn", "unban")
-    -- таймер удаления и респавна транспорта
-    reg("sc", function()
-        if scThread then pcall(function() scThread:terminate() end) end
-        scThread = lua_thread.create(function()
-            safeSend("/a Внимание, через 15 секунд удаляю и респавню весь транспорт на сервере!")
-            wait(15000)
-            safeSend("/dvall") wait(1500)
-            safeSend("/spawncars")
-            scThread = nil
-        end)
-    end)
-    reg("scc", function()
-        if scThread then
-            pcall(function() scThread:terminate() end)
-            scThread = nil
-            fmsg("Таймер респавна транспорта остановлен.")
-        else fmsg("Таймер респавна транспорта не запущен.") end
-    end)
-end
-
 local function registerCommands(reg)
     registerExtra(reg)
-    registerPorted(reg)
     reg("fh", function()
-        if guiState and guiState.ready() then guiState.toggle()
-        else
-            if not guiAllowed() and not GUARD.warned then
-                GUARD.warned = true
-                fmsg("Окно /fh отключено (безопасный режим или конфликт с другим imgui), открываю меню диалогами. Включить окно: /fhgui on")
-            end
-            uiMenu()
-        end
-    end)
-    reg("fhgui", function(p)
-        p = lower1251(trim(p or ""))
-        if p == "on" then
-            cfg.safe, cfg.force, GUARD.warned = false, true, false
-            saveCfg()
-            fmsg("Окно /fh включено. Если игра снова вылетит на окне, безопасный режим включится сам.")
-        elseif p == "off" then
-            cfg.safe = true
-            saveCfg()
-            fmsg("Безопасный режим: вместо окна /fh диалоги и чат. Вернуть окно: /fhgui on")
-        else
-            fmsg("Окно /fh: " .. (guiAllowed() and "включено" or "выключено (безопасный режим или конфликт imgui)") .. ". Команды: /fhgui on | off")
-        end
+        if guiState and guiState.ready() then guiState.toggle() else uiMenu() end
     end)
     reg("reports", uiReports)
-    reg("rpl", function() DEF.refresh() end)
     reg("fcmd", uiMenu)
     reg("gw", function(p) gwStart(p, false) end)
     reg("gwlast", function(p) gwStart(p, true) end)
@@ -3135,24 +2935,10 @@ function main()
     local okB, errB = pcall(setupBinder, builtin, guardedReg)
     if not okB then print("[FH] binder setup error: " .. tostring(errB)) end
 
-    -- всё, что трогает чат и SAMP, - только когда игра подключена к серверу
-    if sampGetGamestate then
-        while true do
-            local okG, gs = pcall(sampGetGamestate)
-            if not okG or gs == 3 then break end
-            wait(250)
-        end
-    end
-    wait(1500)
     fmsg("{FFD700}FilippHelper v" .. VERSION .. " {FFFFFF}- загружен")
-    if GUARD.notice then
-        fmsg("{FF6666}Прошлый запуск закрылся на окне /fh. Включён безопасный режим: вместо окна диалоги и чат. Вернуть окно: /fhgui on")
-    end
-    fmsg("{A9A9A9}Автор и разработчик: {66CCFF}ByFilipp {A9A9A9}| при участии {66CCFF}Claude {A9A9A9}(Anthropic)")
-    fmsg("{A9A9A9}Раздачи, репорты, мероприятия, проверка активности, транспорт, биндер и ИИ-ответы - в одном окне")
-    fmsg("{A9A9A9}Окно управления: {FFFF00}/fh {A9A9A9}| все команды: {FFFF00}/fcmd {A9A9A9}| биндер: {FFFF00}/fbind")
-    fmsg("{A9A9A9}Обновления: {FFFF00}/fhupd {A9A9A9}| диагностика: {FFFF00}/fhdiag {A9A9A9}| проверка уведомления: {FFFF00}/reptest")
-    fmsg("{A9A9A9}Поддержка и вопросы: {FFFF00}@ByFilipp123 {A9A9A9}- приятной игры!")
+    fmsg("{A9A9A9}Автор: {66CCFF}ByFilipp {A9A9A9}| при участии {66CCFF}Claude {A9A9A9}(Anthropic)")
+    fmsg("{A9A9A9}Меню: {FFFF00}/fh {A9A9A9}| команды: {FFFF00}/fcmd {A9A9A9}| поддержка: {FFFF00}@ByFilipp123")
+    pcall(function() if guiState and guiState.ready() then guiState.notify() end end)
     if cfg.autoupd then
         lua_thread.create(function()
             wait(15000)   -- не мешаем загрузке игры
@@ -3166,9 +2952,4 @@ function main()
         local okT, errT = pcall(uiTick)
         if not okT then print("[FH] tick error: " .. tostring(errT)) end
     end
-end
-
-function onScriptTerminate(scr, quitGame)
-    local ok, me = pcall(thisScript)
-    if ok and scr == me then GUARD.set(false) end
 end

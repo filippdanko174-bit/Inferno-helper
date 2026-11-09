@@ -3,6 +3,10 @@
 Помощник администратора SA-MP для MoonLoader (ПК) и MonetLoader (Android).
 Автор: **ByFilipp** · поддержка: @ByFilipp123
 
+## Версия
+- Основа: **1.1**. Рабочая версия без метки над ником (она пишется в чат) и без уведомления о каждом репорте.
+- Файл для ПК (`FilippHelper.lua`) в cp1251, для телефона (`FilippHelper_Mobile.lua`) в UTF-8.
+
 ## Установка
 - **ПК:** `FilippHelper.lua` → папка `moonloader`. Файл в кодировке Windows-1251, не пересохраняйте в UTF-8.
 - **Android:** `FilippHelper_Mobile.lua` → папка скриптов MonetLoader. Файл в UTF-8.
