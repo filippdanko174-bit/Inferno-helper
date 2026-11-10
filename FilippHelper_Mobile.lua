@@ -14,7 +14,7 @@ local function fromUi(s) return s end
 local function toGame(s) if enc8 then return enc8:decode(s) end return s end
 local function fromGame(s) if enc8 then return enc8:encode(s) end return s end
 
-local VERSION = "1.4.1"
+local VERSION = "1.4.2"
 local MAX_CHAT_LEN = 128
 local SEND_GAP = 1100
 local MAX_REPORTS = 15
@@ -2491,6 +2491,7 @@ local function setupGui()
         if not c then c = toUi(s) ucache[s] = c end
         return c
     end
+    local function EU(s) return (toUi(tostring(s)):gsub("%%", "%%%%")) end
 
     local function bigText(s, color)
         local pushed = G.big and pcall(imgui.PushFont, G.big)
@@ -3059,7 +3060,7 @@ local function setupGui()
         if primary("Обновить всё##nrall", V2(fs * 9, fs * 2)) then post(LD.all) end
         imgui.SameLine()
         local st = (AD.busy and AD.status) or (LD.busy and LD.status) or (AD.status ~= "" and AD.status) or LD.status
-        imgui.TextColored((AD.busy or LD.busy) and YEL or GRAY, U(st ~= "" and st or "Нажмите «Обновить всё»."))
+        imgui.TextColored((AD.busy or LD.busy) and YEL or GRAY, EU(st ~= "" and st or "Нажмите «Обновить всё»."))
         imgui.Spacing()
         for i, sc in ipairs(LD_SCOPES) do
             if i > 1 then imgui.SameLine() end
@@ -3088,8 +3089,8 @@ local function setupGui()
                 shown = shown + 1
                 local done = r.min >= LD.norm[r.cat]
                 local w = imgui.GetContentRegionAvail().x
-                imgui.TextColored(GRAY, U(r.fr))
-                imgui.SameLine(w * 0.30) imgui.Text(U(r.nick))
+                imgui.TextColored(GRAY, EU(r.fr))
+                imgui.SameLine(w * 0.30) imgui.Text(EU(r.nick))
                 imgui.SameLine(w * 0.58) imgui.TextColored(r.online and GREEN or GRAY, U(ldHM(r.min)))
                 imgui.SameLine(w * 0.70) imgui.TextColored(done and GREEN or RED, U(done and "Выполнено" or "Не выполнено"))
                 imgui.Indent(fs * 1.5)
@@ -3121,8 +3122,8 @@ local function setupGui()
                 shownA = shownA + 1
                 local r = AD.res[a.nick:lower()]
                 local w = imgui.GetContentRegionAvail().x
-                imgui.Text(U(a.nick))
-                imgui.SameLine(w * 0.34) imgui.TextColored(GRAY, U(a.role))
+                imgui.Text(EU(a.nick))
+                imgui.SameLine(w * 0.34) imgui.TextColored(GRAY, EU(a.role))
                 imgui.SameLine(w * 0.64)
                 if r and r.value then
                     local done = r.value >= AD.norm
@@ -3142,7 +3143,7 @@ local function setupGui()
                 end
                 if r then
                     local shownLine = r.line or r.lines[1]
-                    if shownLine then imgui.SameLine() imgui.TextColored(GRAY, cutUtf8(toUi(shownLine), 70)) end
+                    if shownLine then imgui.SameLine() imgui.TextColored(GRAY, (cutUtf8(toUi(shownLine), 70):gsub("%%", "%%%%"))) end
                 end
                 imgui.Unindent(fs * 1.5)
                 imgui.Spacing()
