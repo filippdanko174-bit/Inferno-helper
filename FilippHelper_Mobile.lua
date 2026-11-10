@@ -14,7 +14,7 @@ local function fromUi(s) return s end
 local function toGame(s) if enc8 then return enc8:decode(s) end return s end
 local function fromGame(s) if enc8 then return enc8:encode(s) end return s end
 
-local VERSION = "1.4"
+local VERSION = "1.4.1"
 local MAX_CHAT_LEN = 128
 local SEND_GAP = 1100
 local MAX_REPORTS = 15
@@ -2316,7 +2316,7 @@ function AD.run(nicks)
                 AD.expect, AD.cap = nil, nil
                 local v, line = AD.extract(cap.lines)
                 AD.res[a.nick:lower()] = { lines = cap.lines, value = v, line = line }
-                if i < #queue then wait(SEND_GAP) end
+                if i < #queue then wait(1800) end
             end
         end)
         AD.busy, AD.expect, AD.cap = false, nil, nil
@@ -2410,6 +2410,7 @@ function LD.all()
         LD.refresh()
         local t0 = os.clock()
         while LD.busy and os.clock() - t0 < 25 do wait(200) end
+        wait(2500)
         AD.run(AD.list)
     end)
 end
