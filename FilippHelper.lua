@@ -14,7 +14,7 @@ local function fromUi(s) if enc8 then return enc8:decode(s) end return s end
 local function toGame(s) return s end
 local function fromGame(s) return s end
 
-local VERSION = "1.4.2"
+local VERSION = "1.4.3"
 local MAX_CHAT_LEN = 128
 local SEND_GAP = 1100
 local MAX_REPORTS = 15
@@ -2401,7 +2401,7 @@ function LD.struct(scope)
     return table.concat(out, "\n")
 end
 
-function LD.all()
+function LD.updateAll()
     lua_thread.create(function()
         LD.refresh()
         local t0 = os.clock()
@@ -3053,7 +3053,7 @@ local function setupGui()
 
     pages[14] = { "Норма", function()
         title("Норма", "Лидеры (/aleaders, /leaders) и следящие (нлист, /getoffstats) по структурам")
-        if primary("Обновить всё##nrall", V2(fs * 9, fs * 2)) then post(LD.all) end
+        if primary("Обновить всё##nrall", V2(fs * 9, fs * 2)) then post(LD.updateAll) end
         imgui.SameLine()
         local st = (AD.busy and AD.status) or (LD.busy and LD.status) or (AD.status ~= "" and AD.status) or LD.status
         imgui.TextColored((AD.busy or LD.busy) and YEL or GRAY, EU(st ~= "" and st or "Нажмите «Обновить всё»."))
@@ -3443,7 +3443,7 @@ end
 local function registerCommands(reg)
     registerExtra(reg)
     reg("ldrefresh", function() LD.refresh() end)
-    reg("normall", function() LD.all() end)
+    reg("normall", function() LD.updateAll() end)
     reg("ldnorm", function(p) LD.cmdNorm(p) end)
     reg("lds", function()
         if guiState and guiState.ready() then guiState.page = LD.pageIdx guiState.show[0] = true else LD.cmdNorm("all") end
