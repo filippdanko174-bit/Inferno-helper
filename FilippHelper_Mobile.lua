@@ -2083,6 +2083,16 @@ function LD.build(scope, fmt)
     return LD.report(scope)
 end
 
+function LD.press(kind, nick, reason)
+    reason = trim(reason or "")
+    if kind == "off" then return "/offleader " .. nick end
+    if kind == "unvig" then return "/aunvig " .. nick end
+    if kind == "vig" then
+        if reason == "" then return nil, "Укажите причину выговора." end
+        return "/avig " .. nick .. " " .. reason
+    end
+end
+
 function LD.saveReport(text)
     local path = ldDir() .. "/FilippHelper_norm.txt"
     local ok = pcall(function()
@@ -2692,6 +2702,7 @@ local function setupGui()
 
     local ldBuf = { ghetto = imgui.new.int(LD.norm.ghetto), mafia = imgui.new.int(LD.norm.mafia), gov = imgui.new.int(LD.norm.gov) }
     local ldScope, ldFmt = "all", "forum"
+    local ldReason = buf(100)
     local LD_SCOPES = { { "all", "Все" }, { "ghetto", "Гетто" }, { "mafia", "Мафии" }, { "gov", "Госс" } }
     pages[14] = { "Лидеры", function()
         title("Лидеры", "Список из /aleaders, онлайн из /leaders, норма и снятие")
@@ -2715,6 +2726,9 @@ local function setupGui()
             if act then imgui.PopStyleColor() end
         end
         imgui.Spacing()
+        imgui.Text(U("Причина выговора")) imgui.SameLine()
+        imgui.PushItemWidth(-1) imgui.InputText("##ldreason", ldReason, 100) imgui.PopItemWidth()
+        imgui.Spacing()
         hint("Норма, минут онлайн:")
         for i, k in ipairs { "ghetto", "mafia", "gov" } do
             if i > 1 then imgui.SameLine() end
@@ -2734,25 +2748,32 @@ local function setupGui()
                 local done = r.min >= LD.norm[r.cat]
                 local w = imgui.GetContentRegionAvail().x
                 imgui.TextColored(GRAY, U(r.fr))
-                imgui.SameLine(w * 0.28) imgui.Text(U(r.nick))
-                imgui.SameLine(w * 0.51) imgui.TextColored(r.online and GREEN or GRAY, U(ldHM(r.min)))
-                imgui.SameLine(w * 0.58) imgui.TextColored(done and GREEN or RED, U(done and "Выполнено" or "Не выполнено"))
-                local function act(kind, label, cmd, x, bw)
+                imgui.SameLine(w * 0.30) imgui.Text(U(r.nick))
+                imgui.SameLine(w * 0.58) imgui.TextColored(r.online and GREEN or GRAY, U(ldHM(r.min)))
+                imgui.SameLine(w * 0.70) imgui.TextColored(done and GREEN or RED, U(done and "Выполнено" or "Не выполнено"))
+                imgui.Indent(fs * 1.5)
+                local function act(kind, label, bw)
                     local armed = LD.arm and LD.arm.nick == r.nick and LD.arm.kind == kind and os.clock() - LD.arm.t < 5
                     if armed then imgui.PushStyleColor(imgui.Col.Button, RED) end
-                    imgui.SameLine(x)
                     local clicked = imgui.Button(U(armed and "Точно?" or label) .. "##ld" .. kind .. i, V2(bw, 0))
                     if armed then imgui.PopStyleColor() end
                     if clicked then
-                        if armed then
+                        local cmd, why = LD.press(kind, r.nick, getBuf(ldReason))
+                        if not cmd then
+                            LD.status = why
+                        elseif armed then
                             LD.arm = nil
-                            local nm = r.nick
-                            post(function() safeSend(cmd .. " " .. nm) fmsg("{FFFF00}" .. cmd .. " " .. nm) end)
-                        else LD.arm = { nick = r.nick, t = os.clock(), kind = kind } end
+                            post(function() safeSend(cmd) fmsg("{FFFF00}" .. cmd) end)
+                        else
+                            LD.arm = { nick = r.nick, t = os.clock(), kind = kind }
+                        end
                     end
                 end
-                act("off", "Снять", "/offleader", w * 0.775, w * 0.105)
-                act("vig", "Выговор", "/avig", w * 0.885, w * 0.115)
+                act("off", "Снять", fs * 5) imgui.SameLine()
+                act("vig", "Выговор", fs * 6) imgui.SameLine()
+                act("unvig", "Снять выговор", fs * 8)
+                imgui.Unindent(fs * 1.5)
+                imgui.Spacing()
             end
         end
         if shown == 0 then hint("Пусто. Нажмите «Обновить».") end
@@ -2765,7 +2786,7 @@ local function setupGui()
         if imgui.Button(U("Сохранить в файл") .. "##ldsave", V2(fs * 11, fs * 2)) then
             post(function() LD.cmdNorm(ldScope .. (ldFmt == "list" and " list" or "")) end)
         end
-        hint("Снять (/offleader) и Выговор (/avig): нажмите кнопку, затем «Точно?» в течение 5 секунд.")
+        hint("/offleader, /avig ник причина, /aunvig: нажмите кнопку, затем «Точно?» в течение 5 секунд.")
     end }
 
     local function drawBody()
