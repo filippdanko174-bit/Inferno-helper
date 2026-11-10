@@ -14,7 +14,7 @@ local function fromUi(s) if enc8 then return enc8:decode(s) end return s end
 local function toGame(s) return s end
 local function fromGame(s) return s end
 
-local VERSION = "1.1"
+local VERSION = "1.2"
 local MAX_CHAT_LEN = 128
 local SEND_GAP = 1100
 local MAX_REPORTS = 15
@@ -545,7 +545,14 @@ local function armAutoMp(force)
     safeSend("/mp")
 end
 
+local LD = { expect = nil, got = false, busy = false, status = "", all = {}, online = {}, rows = {}, raw = {}, rawMiss = {},
+    norm = { ghetto = 120, mafia = 120, gov = 120 }, pageIdx = 14 }
+
 function ev.onShowDialog(id, style, title, b1, b2, text)
+    if LD.expect and LD.capture then
+        local okC, swallow = pcall(LD.capture, id, style, title, text)
+        if okC and swallow then return false end
+    end
     if not autoMp.armed then return end
     if os.clock() - autoMp.t0 > 6 then autoMp.armed = false return end
     if style ~= 2 and style ~= 4 and style ~= 5 then return end
@@ -1823,6 +1830,7 @@ local MENU_ROWS = {
     { "/jj /mut /ww [ID]", "jail, mute, warn - вставят команду в ввод" },
     { "/bb /uw /uj /unm /ub", "ban, unwarn, unjail, unmute, unban" },
     { "/ib /ip /bip /ofl /mkl", "iban, pgetip, banip, offleader, makeleader" },
+    { "/lds /ldrefresh /ldnorm [ghetto|mafia|gov|all]", "лидеры: окно, обновить из /aleaders и /leaders, норма в BBCode в файл" },
     { "/gs /inv [ID]", "getstats, checkinv (ID или из /re)" },
     { "/fuel /fc /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
     { "/spc /dva /dvs", "spawncars; удаление админ-каров (таймер 15 с в /a); то же + spawncars" },
@@ -1857,6 +1865,216 @@ local function runPosted()
 end
 
 local guiState
+
+local LD_GHETTO = {
+    { key = "ballas", name = "Southside Ballas", color = "FF1493" },
+    { key = "vagos", name = "LS Vagos", color = "FFD700" },
+    { key = "grove", name = "Grove Street", color = "3FB950" },
+    { key = "aztecas", name = "Varios Los Aztecas", color = "87CEEB" },
+    { key = "rifa", name = "Rifa Gang", color = "4169E1" },
+}
+local LD_CATCOL = { mafia = "FF8C00", gov = "1E90FF" }
+local LD_ORDER = { ghetto = 1, mafia = 2, gov = 3 }
+
+local function ldCat(fr)
+    local low = fr:lower()
+    for _, g in ipairs(LD_GHETTO) do
+        if low:find(g.key, 1, true) then return "ghetto" end
+    end
+    if fr:find("афия", 1, true) or low:find("yakuza", 1, true) then return "mafia" end
+    return "gov"
+end
+
+local function ldHM(min)
+    return string.format("%d:%02d", math.floor(min / 60), min % 60)
+end
+
+local function ldParse(text)
+    local list = {}
+    text = fromGame(tostring(text or "")):gsub("{%x%x%x%x%x%x}", ""):gsub("\r", "")
+    for line in (text .. "\n"):gmatch("(.-)\n") do
+        line = trim(line:gsub("\t", " "))
+        local fr, nick, rest = line:match("^Лидер%s+(.-):%s*([%w_%.%[%]]+)(.*)$")
+        if not fr then
+            fr, nick, rest = line:match("^(.-):%s*([%a][%w%.%[%]]*_[%w_%.%[%]]+)(.*)$")
+        end
+        if fr and nick and trim(fr) ~= "" then
+            local h, m = (rest or ""):match("%[%s*(%d+)%D-(%d+)%D-%]")
+            list[#list + 1] = { fr = trim(fr), nick = nick, min = h and (tonumber(h) * 60 + tonumber(m)) or nil }
+        end
+    end
+    return list
+end
+
+local function ldDir()
+    local dir = getWorkingDirectory() .. "/config"
+    pcall(createDirectory, dir)
+    return dir
+end
+
+function LD.capture(id, style, title, text)
+    local list = ldParse(text)
+    if #list == 0 then
+        LD.rawMiss[LD.expect] = fromGame(tostring(text or ""))
+        return false
+    end
+    LD.raw[LD.expect] = fromGame(tostring(text or ""))
+    if LD.expect == "all" then LD.all = list else LD.online = list end
+    LD.got = true
+    lua_thread.create(function()
+        wait(200)
+        pcall(sampSendDialogResponse, id, 0, 0, "")
+    end)
+    return true
+end
+
+function LD.merge()
+    local src = (#LD.all > 0) and LD.all or LD.online
+    local on, seen, rows = {}, {}, {}
+    for _, o in ipairs(LD.online) do on[o.nick:lower()] = o end
+    for _, l in ipairs(src) do
+        local o = on[l.nick:lower()]
+        seen[l.nick:lower()] = true
+        rows[#rows + 1] = { fr = l.fr, nick = l.nick, min = (o and o.min) or l.min or 0, online = o ~= nil, cat = ldCat(l.fr) }
+    end
+    for _, o in ipairs(LD.online) do
+        if not seen[o.nick:lower()] then
+            rows[#rows + 1] = { fr = o.fr, nick = o.nick, min = o.min or 0, online = true, cat = ldCat(o.fr) }
+        end
+    end
+    table.sort(rows, function(a, b)
+        if a.cat ~= b.cat then return LD_ORDER[a.cat] < LD_ORDER[b.cat] end
+        if a.fr ~= b.fr then return a.fr < b.fr end
+        return a.nick < b.nick
+    end)
+    LD.rows = rows
+end
+
+function LD.saveRaw()
+    pcall(function()
+        local f = assert(io.open(ldDir() .. "/FilippHelper_leaders_raw.txt", "wb"))
+        for _, k in ipairs { "all", "online" } do
+            f:write("=== ", k == "all" and "/aleaders" or "/leaders", " ===\r\n")
+            f:write(((LD.raw[k] or LD.rawMiss[k] or "(диалог не пришёл)"):gsub("\r?\n", "\r\n")), "\r\n")
+        end
+        f:close()
+    end)
+end
+
+function LD.refresh()
+    if LD.busy then return end
+    LD.busy = true
+    LD.status = "Запрашиваю /aleaders..."
+    LD.raw, LD.rawMiss = {}, {}
+    lua_thread.create(function()
+        local ok, err = pcall(function()
+            local function ask(cmd, kind)
+                LD.expect, LD.got = kind, false
+                safeSend(cmd)
+                local t0 = os.clock()
+                while not LD.got and os.clock() - t0 < 5 do wait(100) end
+                LD.expect = nil
+                return LD.got
+            end
+            ask("/aleaders", "all")
+            LD.status = "Запрашиваю /leaders..."
+            wait(1200)
+            ask("/leaders", "online")
+            LD.merge()
+            LD.saveRaw()
+        end)
+        LD.busy, LD.expect = false, nil
+        if not ok then
+            print("[FH] leaders error: " .. tostring(err))
+            LD.status = "Ошибка, смотрите moonloader.log"
+            return
+        end
+        if #LD.rows == 0 then
+            LD.status = "Лидеры не найдены (формат диалога не распознан)."
+            fmsg("{FF6666}Не удалось разобрать диалоги. Сырой текст сохранён: {FFFFFF}moonloader/config/FilippHelper_leaders_raw.txt")
+        else
+            LD.status = string.format("Лидеров: %d (в сети: %d)", #LD.rows, #LD.online)
+            fmsg("{66FF66}" .. LD.status .. ". {A9A9A9}Окно: {FFFF00}/lds")
+        end
+    end)
+end
+
+function LD.report(scope)
+    local out = { "[CENTER][SIZE=4][B][COLOR=#FFD700]ОНЛАЙН СТРУКТУР НА " .. os.date("%d.%m") .. "[/COLOR][/B][/SIZE][/CENTER]", "" }
+    local function block(name, color, items, cat)
+        out[#out + 1] = string.format("[COLOR=#%s][B]%s:[/B][/COLOR]", color, name)
+        if #items == 0 then
+            out[#out + 1] = "[COLOR=#C9D1D9]Лидер: нет | Онлайн: 0:00 | Не выполнено[/COLOR]"
+        else
+            for _, r in ipairs(items) do
+                out[#out + 1] = string.format("[COLOR=#C9D1D9]Лидер: %s | Онлайн: %s | %s[/COLOR]", r.nick, ldHM(r.min),
+                    r.min >= LD.norm[cat] and "Выполнено" or "Не выполнено")
+            end
+        end
+        out[#out + 1] = ""
+    end
+    if scope == "all" or scope == "ghetto" then
+        for _, g in ipairs(LD_GHETTO) do
+            local items = {}
+            for _, r in ipairs(LD.rows) do
+                if r.cat == "ghetto" and r.fr:lower():find(g.key, 1, true) then items[#items + 1] = r end
+            end
+            block(g.name, g.color, items, "ghetto")
+        end
+    end
+    for _, cat in ipairs { "mafia", "gov" } do
+        if scope == "all" or scope == cat then
+            local order, by = {}, {}
+            for _, r in ipairs(LD.rows) do
+                if r.cat == cat then
+                    if not by[r.fr] then by[r.fr] = {} order[#order + 1] = r.fr end
+                    by[r.fr][#by[r.fr] + 1] = r
+                end
+            end
+            for _, fr in ipairs(order) do block(fr, LD_CATCOL[cat], by[fr], cat) end
+        end
+    end
+    while out[#out] == "" do out[#out] = nil end
+    return table.concat(out, "\n")
+end
+
+function LD.saveReport(text)
+    local path = ldDir() .. "/FilippHelper_norm.txt"
+    local ok = pcall(function()
+        local f = assert(io.open(path, "wb"))
+        f:write((text:gsub("\n", "\r\n")))
+        f:close()
+    end)
+    return ok and path or nil
+end
+
+function LD.saveNorm()
+    pcall(function()
+        local f = assert(io.open(ldDir() .. "/FilippHelper_norm_cfg.txt", "wb"))
+        f:write("ghetto=", LD.norm.ghetto, "\r\nmafia=", LD.norm.mafia, "\r\ngov=", LD.norm.gov, "\r\n")
+        f:close()
+    end)
+end
+
+function LD.loadNorm()
+    local f = io.open(ldDir() .. "/FilippHelper_norm_cfg.txt", "rb")
+    if not f then return end
+    for line in f:lines() do
+        local k, v = line:match("^(%a+)=(%d+)")
+        if k and LD.norm[k] then LD.norm[k] = math.min(1440, tonumber(v)) end
+    end
+    f:close()
+end
+pcall(LD.loadNorm)
+
+function LD.cmdNorm(p)
+    p = trim(p or ""):lower()
+    local scope = ({ ghetto = true, mafia = true, gov = true, all = true })[p] and p or "all"
+    if #LD.rows == 0 then fmsg("Список лидеров пуст. Сначала /ldrefresh.") return end
+    local path = LD.saveReport(LD.report(scope))
+    if path then fmsg("{66FF66}Норма сохранена в файл: {FFFFFF}" .. path)
+    else fmsg("{FF6666}Не удалось сохранить файл нормы.") end
+end
 
 local function setupGui()
     if not GUI_ENCODING_OK then return nil end
@@ -2424,6 +2642,71 @@ local function setupGui()
         end
     end
 
+    local ldBuf = { ghetto = imgui.new.int(LD.norm.ghetto), mafia = imgui.new.int(LD.norm.mafia), gov = imgui.new.int(LD.norm.gov) }
+    local ldScope = "all"
+    local LD_SCOPES = { { "all", "Все" }, { "ghetto", "Гетто" }, { "mafia", "Мафии" }, { "gov", "Госс" } }
+    pages[14] = { "Лидеры", function()
+        title("Лидеры", "Список из /aleaders, онлайн из /leaders, норма и снятие")
+        if primary("Обновить##ldref", V2(fs * 9, fs * 2)) then post(function() LD.refresh() end) end
+        imgui.SameLine()
+        imgui.TextColored(LD.busy and YEL or GRAY, U(LD.status ~= "" and LD.status or "Нажмите «Обновить»."))
+        imgui.Spacing()
+        for i, sc in ipairs(LD_SCOPES) do
+            if i > 1 then imgui.SameLine() end
+            local act = ldScope == sc[1]
+            if act then imgui.PushStyleColor(imgui.Col.Button, ACC) end
+            if imgui.Button(U(sc[2]) .. "##ldsc" .. i, V2(fs * 6, fs * 1.8)) then ldScope = sc[1] end
+            if act then imgui.PopStyleColor() end
+        end
+        imgui.Spacing()
+        hint("Норма, минут онлайн:")
+        for i, k in ipairs { "ghetto", "mafia", "gov" } do
+            if i > 1 then imgui.SameLine() end
+            imgui.Text(U(k == "ghetto" and "Гетто" or (k == "mafia" and "Мафии" or "Госс")))
+            imgui.SameLine() imgui.PushItemWidth(fs * 5)
+            if imgui.InputInt("##ldn" .. k, ldBuf[k], 0) then
+                LD.norm[k] = math.max(0, math.min(1440, ldBuf[k][0]))
+                post(LD.saveNorm)
+            end
+            imgui.PopItemWidth()
+        end
+        imgui.Spacing() imgui.Separator() imgui.Spacing()
+        local shown = 0
+        for i, r in ipairs(LD.rows) do
+            if ldScope == "all" or r.cat == ldScope then
+                shown = shown + 1
+                local done = r.min >= LD.norm[r.cat]
+                imgui.TextColored(GRAY, U(r.fr))
+                imgui.SameLine(fs * 13) imgui.Text(U(r.nick))
+                imgui.SameLine(fs * 23) imgui.TextColored(r.online and GREEN or GRAY, U(ldHM(r.min)))
+                imgui.SameLine(fs * 27) imgui.TextColored(done and GREEN or RED, U(done and "Выполнено" or "Не выполнено"))
+                local armed = LD.arm and LD.arm.nick == r.nick and os.clock() - LD.arm.t < 5
+                if armed then imgui.PushStyleColor(imgui.Col.Button, RED) end
+                imgui.SameLine(fs * 35)
+                local clicked = imgui.Button(U(armed and "Точно?" or "Снять") .. "##ldof" .. i, V2(fs * 5, 0))
+                if armed then imgui.PopStyleColor() end
+                if clicked then
+                    if armed then
+                        LD.arm = nil
+                        local nm = r.nick
+                        post(function() safeSend("/offleader " .. nm) fmsg("{FFFF00}/offleader " .. nm) end)
+                    else LD.arm = { nick = r.nick, t = os.clock() } end
+                end
+            end
+        end
+        if shown == 0 then hint("Пусто. Нажмите «Обновить».") end
+        imgui.Spacing() imgui.Separator() imgui.Spacing()
+        if primary("Скопировать норму##ldcopy", V2(fs * 11, fs * 2)) then
+            imgui.SetClipboardText(toUi(LD.report(ldScope)))
+            LD.status = "Норма скопирована в буфер."
+        end
+        imgui.SameLine()
+        if imgui.Button(U("Сохранить в файл") .. "##ldsave", V2(fs * 11, fs * 2)) then
+            post(function() LD.cmdNorm(ldScope) end)
+        end
+        hint("Снять: нажмите «Снять», затем «Точно?» в течение 5 секунд.")
+    end }
+
     local function drawBody()
 
         imgui.BeginChild("##side", V2(fs * 10, 0), true)
@@ -2434,7 +2717,7 @@ local function setupGui()
 
             local groups = {
                 { "ГЛАВНОЕ", { "Главная", "Проверка", "Репорты", "Раздачи", "Мероприятия" } },
-                { "АДМИНИСТРИРОВАНИЕ", { "Фракции", "Транспорт", "Памятки", "Занять" } },
+                { "АДМИНИСТРИРОВАНИЕ", { "Фракции", "Лидеры", "Транспорт", "Памятки", "Занять" } },
                 { "ИНСТРУМЕНТЫ", { "Биндер", "Шпаргалки", "Команды" } },
             }
             local byName, used = {}, {}
@@ -2705,6 +2988,11 @@ end
 
 local function registerCommands(reg)
     registerExtra(reg)
+    reg("ldrefresh", function() LD.refresh() end)
+    reg("ldnorm", function(p) LD.cmdNorm(p) end)
+    reg("lds", function()
+        if guiState and guiState.ready() then guiState.page = LD.pageIdx guiState.show[0] = true else LD.cmdNorm("all") end
+    end)
     reg("fstop", function() bindStop = true bmsg("Бинд остановлен.") end)
     reg("fh", function()
         if guiState and guiState.ready() then guiState.toggle() else uiMenu() end
