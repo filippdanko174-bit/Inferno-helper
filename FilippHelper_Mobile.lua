@@ -1918,12 +1918,15 @@ end
 
 function LD.capture(id, style, title, text)
     local list = ldParse(text)
+    local body = fromGame(tostring(text or ""))
     if #list == 0 then
-        LD.rawMiss[LD.expect] = fromGame(tostring(text or ""))
-        return false
+        local ttl = fromGame(tostring(title or ""))
+        if not (ttl:find("идер", 1, true) or body:find("идер", 1, true)) then return false end
+        LD.rawMiss[LD.expect] = body
+    else
+        LD.raw[LD.expect] = body
+        if LD.expect == "all" then LD.all = list else LD.online = list end
     end
-    LD.raw[LD.expect] = fromGame(tostring(text or ""))
-    if LD.expect == "all" then LD.all = list else LD.online = list end
     LD.got = true
     lua_thread.create(function()
         wait(200)
