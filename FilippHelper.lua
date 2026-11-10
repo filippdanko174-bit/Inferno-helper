@@ -14,7 +14,7 @@ local function fromUi(s) if enc8 then return enc8:decode(s) end return s end
 local function toGame(s) return s end
 local function fromGame(s) return s end
 
-local VERSION = "1.2"
+local VERSION = "1.3"
 local MAX_CHAT_LEN = 128
 local SEND_GAP = 1100
 local MAX_REPORTS = 15
@@ -545,10 +545,15 @@ local function armAutoMp(force)
     safeSend("/mp")
 end
 
+local AD
 local LD = { expect = nil, got = false, busy = false, status = "", all = {}, online = {}, rows = {}, raw = {}, rawMiss = {},
     norm = { ghetto = 120, mafia = 120, gov = 120 }, pageIdx = 14 }
 
 function ev.onShowDialog(id, style, title, b1, b2, text)
+    if AD and AD.expect then
+        local okA, swA = pcall(AD.dialog, id, style, title, text)
+        if okA and swA then return false end
+    end
     if LD.expect and LD.capture then
         local okC, swallow = pcall(LD.capture, id, style, title, text)
         if okC and swallow then return false end
@@ -1830,6 +1835,7 @@ local MENU_ROWS = {
     { "/jj /mut /ww [ID]", "jail, mute, warn - вставят команду в ввод" },
     { "/bb /uw /uj /unm /ub", "ban, unwarn, unjail, unmute, unban" },
     { "/ib /ip /bip /ofl /mkl", "iban, pgetip, banip, offleader, makeleader" },
+    { "/admnorm /admcheck [ник]", "норма админов: окно (нлист из ВК), проверка через /getoffstats" },
     { "/lds /ldrefresh /ldnorm [ghetto|mafia|gov|all]", "лидеры: окно, обновить из /aleaders и /leaders, норма в файл (list - простой список, иначе BBCode)" },
     { "/gs /inv [ID]", "getstats, checkinv (ID или из /re)" },
     { "/fuel /fc /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
@@ -2079,14 +2085,8 @@ function LD.build(scope, fmt)
     return LD.report(scope)
 end
 
-function LD.press(kind, nick, reason)
-    reason = trim(reason or "")
+function LD.press(kind, nick)
     if kind == "off" then return "/offleader " .. nick end
-    if kind == "unvig" then return "/aunvig " .. nick end
-    if kind == "vig" then
-        if reason == "" then return nil, "Укажите причину выговора." end
-        return "/avig " .. nick .. " " .. reason
-    end
 end
 
 function LD.saveReport(text)
@@ -2128,6 +2128,229 @@ function LD.cmdNorm(p)
     local path = LD.saveReport(LD.build(scope, fmt))
     if path then fmsg("{66FF66}Норма сохранена в файл: {FFFFFF}" .. path)
     else fmsg("{FF6666}Не удалось сохранить файл нормы.") end
+end
+
+local IS_UTF8 = ("я"):byte(1) == 209
+local function lowAny(s)
+    s = tostring(s or ""):lower()
+    if IS_UTF8 then return lower1251(s) end
+    return (s:gsub("[\192-\223]", function(c) return string.char(c:byte() + 32) end))
+end
+
+AD = { list = {}, res = {}, expect = nil, cap = nil, busy = false, status = "", norm = 120, key = "онлайн", pageIdx = 15 }
+
+function AD.parse(text)
+    local out = {}
+    text = tostring(text or ""):gsub("{%x%x%x%x%x%x}", ""):gsub("\r", "")
+    for line in (text .. "\n"):gmatch("(.-)\n") do
+        line = trim(line:gsub("\t", " "))
+        local nick, rest = line:match("^%d+%.%s*.-%s%-%s+([%a][%w%.%[%]]*_[%w_%.%[%]]+)(.*)$")
+        if not nick then nick, rest = line:match("^.-%s%-%s+([%a][%w%.%[%]]*_[%w_%.%[%]]+)(.*)$") end
+        if nick then
+            rest = rest:gsub("^%s*|%s*", ""):gsub("^%s+I%s+", "")
+            local role = rest:match("^(.-)%s*|") or rest
+            role = role:match("^(.-)%s+I%s") or role
+            role = trim(role:gsub("%s+%d+%.%d+.*$", ""))
+            out[#out + 1] = { nick = nick, role = role }
+        end
+    end
+    return out
+end
+
+function AD.save()
+    pcall(function()
+        local f = assert(io.open(ldDir() .. "/FilippHelper_admins.txt", "wb"))
+        for _, a in ipairs(AD.list) do f:write(a.nick, "|", a.role, "\r\n") end
+        f:close()
+    end)
+end
+
+function AD.saveCfg()
+    pcall(function()
+        local f = assert(io.open(ldDir() .. "/FilippHelper_adm_cfg.txt", "wb"))
+        f:write("norm=", AD.norm, "\r\nkey=", AD.key, "\r\n")
+        f:close()
+    end)
+end
+
+function AD.load()
+    local f = io.open(ldDir() .. "/FilippHelper_admins.txt", "rb")
+    if f then
+        for line in f:lines() do
+            local n, r = line:gsub("\r", ""):match("^([^|]+)|(.*)$")
+            if n then AD.list[#AD.list + 1] = { nick = n, role = r } end
+        end
+        f:close()
+    end
+    f = io.open(ldDir() .. "/FilippHelper_adm_cfg.txt", "rb")
+    if f then
+        for line in f:lines() do
+            line = line:gsub("\r", "")
+            local k, v = line:match("^(%a+)=(.*)$")
+            if k == "norm" and tonumber(v) then AD.norm = math.min(100000, tonumber(v)) end
+            if k == "key" then AD.key = v end
+        end
+        f:close()
+    end
+end
+pcall(AD.load)
+
+function AD.add(text)
+    local added, upd = 0, 0
+    for _, p in ipairs(AD.parse(text)) do
+        local found
+        for _, a in ipairs(AD.list) do
+            if a.nick:lower() == p.nick:lower() then found = a break end
+        end
+        if found then
+            if p.role ~= "" and found.role ~= p.role then found.role = p.role upd = upd + 1 end
+        else
+            AD.list[#AD.list + 1] = p
+            added = added + 1
+        end
+    end
+    if added + upd > 0 then AD.save() end
+    return added, upd
+end
+
+function AD.remove(nick)
+    for i, a in ipairs(AD.list) do
+        if a.nick == nick then table.remove(AD.list, i) break end
+    end
+    AD.res[nick:lower()] = nil
+    AD.save()
+end
+
+function AD.dialog(id, style, title, text)
+    local cap = AD.cap
+    if not (AD.expect and cap) then return false end
+    local body = fromGame(tostring(text or ""))
+    local ttl = fromGame(tostring(title or ""))
+    local nl = AD.expect:lower()
+    if not (body:lower():find(nl, 1, true) or ttl:lower():find(nl, 1, true) or lowAny(ttl):find("стат", 1, true)) then return false end
+    body = body:gsub("{%x%x%x%x%x%x}", ""):gsub("\r", "")
+    for line in (body .. "\n"):gmatch("(.-)\n") do
+        line = trim(line:gsub("\t", " "))
+        if line ~= "" and #cap.lines < 80 then cap.lines[#cap.lines + 1] = line end
+    end
+    cap.dialog = true
+    cap.last = os.clock()
+    lua_thread.create(function()
+        wait(200)
+        pcall(sampSendDialogResponse, id, 0, 0, "")
+    end)
+    return true
+end
+
+function AD.chat(text)
+    local cap = AD.cap
+    if not (AD.expect and cap) then return end
+    local clean = trim(text:gsub("{%x%x%x%x%x%x}", ""):gsub("%c", ""))
+    if clean == "" or #cap.lines >= 80 then return end
+    cap.lines[#cap.lines + 1] = clean
+    cap.last = os.clock()
+end
+
+function AD.extract(lines)
+    local key = lowAny(AD.key)
+    if key == "" then return nil end
+    for _, ln in ipairs(lines) do
+        local s, e = lowAny(ln):find(key, 1, true)
+        if s then
+            local tail = ln:sub(e + 1)
+            local h, m = tail:match("(%d+)%s*ч%D-(%d+)%s*м")
+            if not h then h, m = tail:match("(%d+):(%d+)") end
+            if h then return tonumber(h) * 60 + tonumber(m), ln end
+            local n = tail:match("(%d+)")
+            if n then return tonumber(n), ln end
+        end
+    end
+    return nil
+end
+
+function AD.recalc()
+    for _, a in ipairs(AD.list) do
+        local r = AD.res[a.nick:lower()]
+        if r then r.value, r.line = AD.extract(r.lines) end
+    end
+end
+
+function AD.saveRaw()
+    pcall(function()
+        local f = assert(io.open(ldDir() .. "/FilippHelper_getoffstats_raw.txt", "wb"))
+        for _, a in ipairs(AD.list) do
+            local r = AD.res[a.nick:lower()]
+            if r then
+                f:write("=== ", a.nick, " ===\r\n")
+                if #r.lines == 0 then f:write("(ответа не было)\r\n") end
+                for _, ln in ipairs(r.lines) do f:write(ln, "\r\n") end
+            end
+        end
+        f:close()
+    end)
+end
+
+function AD.run(nicks)
+    if AD.busy then return end
+    if #nicks == 0 then AD.status = "Список админов пуст." return end
+    local queue = {}
+    for i, a in ipairs(nicks) do queue[i] = a end
+    AD.busy = true
+    lua_thread.create(function()
+        local ok, err = pcall(function()
+            for i, a in ipairs(queue) do
+                AD.status = string.format("Проверка %d/%d: %s", i, #queue, a.nick)
+                local cap = { lines = {}, last = nil, dialog = false }
+                AD.cap, AD.expect = cap, a.nick
+                safeSend("/getoffstats " .. a.nick)
+                local t0 = os.clock()
+                while os.clock() - t0 < 5 do
+                    wait(100)
+                    if cap.last and os.clock() - cap.last > (cap.dialog and 0.4 or 1.2) then break end
+                end
+                AD.expect, AD.cap = nil, nil
+                local v, line = AD.extract(cap.lines)
+                AD.res[a.nick:lower()] = { lines = cap.lines, value = v, line = line }
+                if i < #queue then wait(SEND_GAP) end
+            end
+        end)
+        AD.busy, AD.expect, AD.cap = false, nil, nil
+        if not ok then
+            print("[FH] AD.run error: " .. tostring(err))
+            AD.status = "Ошибка, смотрите moonloader.log"
+        else
+            local got = 0
+            for _, a in ipairs(queue) do
+                local r = AD.res[a.nick:lower()]
+                if r and r.value then got = got + 1 end
+            end
+            AD.status = string.format("Проверено: %d, норма найдена у %d", #queue, got)
+            pcall(AD.saveRaw)
+            fmsg("{66FF66}" .. AD.status .. ". {A9A9A9}Окно: {FFFF00}/admnorm")
+        end
+    end)
+end
+
+function AD.report()
+    local lines = { "Норма админов (" .. AD.key .. " >= " .. AD.norm .. ")" }
+    for _, a in ipairs(AD.list) do
+        local r = AD.res[a.nick:lower()]
+        local st
+        if r and r.value then st = r.value .. " | " .. (r.value >= AD.norm and "Выполнено" or "Не выполнено")
+        else st = "нет данных" end
+        lines[#lines + 1] = a.nick .. " | " .. a.role .. " | " .. st
+    end
+    return table.concat(lines, "\n")
+end
+
+function AD.saveReport()
+    local path = ldDir() .. "/FilippHelper_adm_norm.txt"
+    local ok = pcall(function()
+        local f = assert(io.open(path, "wb"))
+        f:write((AD.report():gsub("\n", "\r\n")))
+        f:close()
+    end)
+    return ok and path or nil
 end
 
 local function setupGui()
@@ -2698,10 +2921,9 @@ local function setupGui()
 
     local ldBuf = { ghetto = imgui.new.int(LD.norm.ghetto), mafia = imgui.new.int(LD.norm.mafia), gov = imgui.new.int(LD.norm.gov) }
     local ldScope, ldFmt = "all", "forum"
-    local ldReason = buf(100)
     local LD_SCOPES = { { "all", "Все" }, { "ghetto", "Гетто" }, { "mafia", "Мафии" }, { "gov", "Госс" } }
     pages[14] = { "Лидеры", function()
-        title("Лидеры", "Список из /aleaders, онлайн из /leaders, норма и снятие")
+        title("Норма лидеров", "Список из /aleaders, онлайн из /leaders, норма и снятие")
         if primary("Обновить##ldref", V2(fs * 9, fs * 2)) then post(function() LD.refresh() end) end
         imgui.SameLine()
         imgui.TextColored(LD.busy and YEL or GRAY, U(LD.status ~= "" and LD.status or "Нажмите «Обновить»."))
@@ -2721,9 +2943,6 @@ local function setupGui()
             if imgui.Button(U(f[2]) .. "##ldfmt" .. i, V2(fs * 9, fs * 1.8)) then ldFmt = f[1] end
             if act then imgui.PopStyleColor() end
         end
-        imgui.Spacing()
-        imgui.Text(U("Причина выговора")) imgui.SameLine()
-        imgui.PushItemWidth(-1) imgui.InputText("##ldreason", ldReason, 100) imgui.PopItemWidth()
         imgui.Spacing()
         hint("Норма, минут онлайн:")
         for i, k in ipairs { "ghetto", "mafia", "gov" } do
@@ -2754,7 +2973,7 @@ local function setupGui()
                     local clicked = imgui.Button(U(armed and "Точно?" or label) .. "##ld" .. kind .. i, V2(bw, 0))
                     if armed then imgui.PopStyleColor() end
                     if clicked then
-                        local cmd, why = LD.press(kind, r.nick, getBuf(ldReason))
+                        local cmd, why = LD.press(kind, r.nick)
                         if not cmd then
                             LD.status = why
                         elseif armed then
@@ -2765,9 +2984,7 @@ local function setupGui()
                         end
                     end
                 end
-                act("off", "Снять", fs * 5) imgui.SameLine()
-                act("vig", "Выговор", fs * 6) imgui.SameLine()
-                act("unvig", "Снять выговор", fs * 8)
+                act("off", "Снять", fs * 5)
                 imgui.Unindent(fs * 1.5)
                 imgui.Spacing()
             end
@@ -2782,7 +2999,113 @@ local function setupGui()
         if imgui.Button(U("Сохранить в файл") .. "##ldsave", V2(fs * 11, fs * 2)) then
             post(function() LD.cmdNorm(ldScope .. (ldFmt == "list" and " list" or "")) end)
         end
-        hint("/offleader, /avig ник причина, /aunvig: нажмите кнопку, затем «Точно?» в течение 5 секунд.")
+        hint("/offleader: нажмите кнопку, затем «Точно?» в течение 5 секунд.")
+    end }
+
+    local adNorm = imgui.new.int(AD.norm)
+    local adKey = buf(40)
+    ffi.copy(adKey, cutUtf8(toUi(AD.key), 39))
+    local adPaste = buf(8192)
+    pages[15] = { "Админы", function()
+        title("Норма админов", "Ник и должность из нлиста, статистика через /getoffstats ник")
+        if primary("Проверить всех##adall", V2(fs * 10, fs * 2)) then post(function() AD.run(AD.list) end) end
+        imgui.SameLine()
+        imgui.TextColored(AD.busy and YEL or GRAY, U(AD.status ~= "" and AD.status or "Нажмите «Проверить всех»."))
+        imgui.Spacing()
+        hint("Норма считается по строке ответа, где есть это слово, и числу после него:")
+        imgui.PushItemWidth(fs * 10)
+        if imgui.InputText("##adkey", adKey, 40) then
+            AD.key = getBuf(adKey)
+            post(function() AD.recalc() AD.saveCfg() end)
+        end
+        imgui.PopItemWidth()
+        imgui.SameLine() imgui.Text(U("минимум"))
+        imgui.SameLine() imgui.PushItemWidth(fs * 5)
+        if imgui.InputInt("##adnorm", adNorm, 0) then
+            AD.norm = math.max(0, math.min(100000, adNorm[0]))
+            post(AD.saveCfg)
+        end
+        imgui.PopItemWidth()
+        imgui.Spacing() imgui.Separator() imgui.Spacing()
+        hint("Вставьте нлист из ВК (берутся только ник и должность):")
+        imgui.InputTextMultiline("##adpaste", adPaste, 8192, V2(-1, fs * 6))
+        if imgui.Button(U("Добавить из поля") .. "##adaddf", V2(fs * 10, fs * 1.9)) then
+            local text = getBuf(adPaste)
+            post(function()
+                local a, u = AD.add(text)
+                AD.status = string.format("Добавлено: %d, обновлено: %d, всего: %d", a, u, #AD.list)
+                ffi.fill(adPaste, ffi.sizeof(adPaste), 0)
+            end)
+        end
+        imgui.SameLine()
+        if imgui.Button(U("Добавить из буфера") .. "##adaddc", V2(fs * 11, fs * 1.9)) then
+            local okc, clip = pcall(function() return ffi.string(imgui.GetClipboardText()) end)
+            if okc and clip then
+                clip = fromUi(clip)
+                post(function()
+                    local a, u = AD.add(clip)
+                    AD.status = string.format("Добавлено: %d, обновлено: %d, всего: %d", a, u, #AD.list)
+                end)
+            else
+                AD.status = "Буфер обмена пуст."
+            end
+        end
+        imgui.SameLine()
+        local armedClr = AD.armClear and os.clock() - AD.armClear < 5
+        if armedClr then imgui.PushStyleColor(imgui.Col.Button, RED) end
+        if imgui.Button(U(armedClr and "Точно?" or "Очистить список") .. "##adclr", V2(fs * 9, fs * 1.9)) then
+            if armedClr then
+                AD.armClear = nil
+                post(function() AD.list, AD.res = {}, {} AD.save() AD.status = "Список очищен." end)
+            else
+                AD.armClear = os.clock()
+            end
+        end
+        if armedClr then imgui.PopStyleColor() end
+        imgui.Spacing() imgui.Separator() imgui.Spacing()
+        for i, a in ipairs(AD.list) do
+            local r = AD.res[a.nick:lower()]
+            local w = imgui.GetContentRegionAvail().x
+            imgui.Text(U(a.nick))
+            imgui.SameLine(w * 0.34) imgui.TextColored(GRAY, U(a.role))
+            imgui.SameLine(w * 0.64)
+            if r and r.value then
+                local done = r.value >= AD.norm
+                imgui.TextColored(done and GREEN or RED, U(tostring(r.value) .. "  " .. (done and "Выполнено" or "Не выполнено")))
+            else
+                imgui.TextColored(GRAY, U(r and "нет данных" or "не проверен"))
+            end
+            imgui.Indent(fs * 1.5)
+            if imgui.Button(U("Проверить") .. "##adck" .. i, V2(fs * 6, 0)) then
+                local one = { a }
+                post(function() AD.run(one) end)
+            end
+            imgui.SameLine()
+            if imgui.Button(U("Убрать") .. "##addel" .. i, V2(fs * 5, 0)) then
+                local nk = a.nick
+                post(function() AD.remove(nk) end)
+            end
+            if r then
+                local shown = r.line or r.lines[1]
+                if shown then imgui.SameLine() imgui.TextColored(GRAY, cutUtf8(toUi(shown), 70)) end
+            end
+            imgui.Unindent(fs * 1.5)
+            imgui.Spacing()
+        end
+        if #AD.list == 0 then hint("Список пуст. Вставьте нлист и нажмите «Добавить».") end
+        imgui.Spacing() imgui.Separator() imgui.Spacing()
+        if primary("Скопировать норму##adcopy", V2(fs * 11, fs * 2)) then
+            imgui.SetClipboardText(toUi(AD.report()))
+            AD.status = "Норма скопирована в буфер."
+        end
+        imgui.SameLine()
+        if imgui.Button(U("Сохранить в файл") .. "##adsave", V2(fs * 11, fs * 2)) then
+            post(function()
+                local p = AD.saveReport()
+                AD.status = p and "Сохранено в config/FilippHelper_adm_norm.txt" or "Не удалось сохранить файл."
+            end)
+        end
+        hint("Ответ /getoffstats целиком сохраняется в config/FilippHelper_getoffstats_raw.txt.")
     end }
 
     local function drawBody()
@@ -2795,7 +3118,8 @@ local function setupGui()
 
             local groups = {
                 { "ГЛАВНОЕ", { "Главная", "Проверка", "Репорты", "Раздачи", "Мероприятия" } },
-                { "АДМИНИСТРИРОВАНИЕ", { "Фракции", "Лидеры", "Транспорт", "Памятки", "Занять" } },
+                { "АДМИНИСТРИРОВАНИЕ", { "Фракции", "Транспорт", "Памятки", "Занять" } },
+                { "НОРМА", { "Лидеры", "Админы" } },
                 { "ИНСТРУМЕНТЫ", { "Биндер", "Шпаргалки", "Команды" } },
             }
             local byName, used = {}, {}
@@ -3022,6 +3346,7 @@ local function onServerMessageImpl(color, text)
     if type(text) ~= "string" then return end
     text = fromGame(text)
     pcall(chkCollect, text)
+    if AD.expect then pcall(AD.chat, text) end
     if not text:find("Репорт", 1, true) then return end
 
     local clean = text:gsub("{%x%x%x%x%x%x}", ""):gsub("%c", "")
@@ -3070,6 +3395,17 @@ local function registerCommands(reg)
     reg("ldnorm", function(p) LD.cmdNorm(p) end)
     reg("lds", function()
         if guiState and guiState.ready() then guiState.page = LD.pageIdx guiState.show[0] = true else LD.cmdNorm("all") end
+    end)
+    reg("admnorm", function()
+        if guiState and guiState.ready() then guiState.page = AD.pageIdx guiState.show[0] = true else fmsg("Окно недоступно.") end
+    end)
+    reg("admcheck", function(p)
+        p = trim(p or "")
+        if p == "" then AD.run(AD.list) return end
+        for _, a in ipairs(AD.list) do
+            if a.nick:lower() == p:lower() then AD.run({ a }) return end
+        end
+        AD.run({ { nick = p, role = "" } })
     end)
     reg("fstop", function() bindStop = true bmsg("Бинд остановлен.") end)
     reg("fh", function()
