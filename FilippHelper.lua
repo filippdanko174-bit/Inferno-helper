@@ -14,7 +14,7 @@ local function fromUi(s) if enc8 then return enc8:decode(s) end return s end
 local function toGame(s) return s end
 local function fromGame(s) return s end
 
-local VERSION = "1.4.3"
+local VERSION = "1.4.4"
 local MAX_CHAT_LEN = 128
 local SEND_GAP = 1100
 local MAX_REPORTS = 15
@@ -3136,10 +3136,6 @@ local function setupGui()
                 if imgui.Button(U("Убрать") .. "##addel" .. i, V2(fs * 5, 0)) then
                     local nk = a.nick
                     post(function() AD.remove(nk) end)
-                end
-                if r then
-                    local shownLine = r.line or r.lines[1]
-                    if shownLine then imgui.SameLine() imgui.TextColored(GRAY, (cutUtf8(toUi(shownLine), 70):gsub("%%", "%%%%"))) end
                 end
                 imgui.Unindent(fs * 1.5)
                 imgui.Spacing()
