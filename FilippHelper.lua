@@ -2004,7 +2004,7 @@ function LD.report(scope)
     local function block(name, color, items, cat)
         out[#out + 1] = string.format("[COLOR=#%s][B]%s:[/B][/COLOR]", color, name)
         if #items == 0 then
-            out[#out + 1] = "[COLOR=#C9D1D9]Лидер: нет | Онлайн: 0:00 | Не выполнено[/COLOR]"
+            out[#out + 1] = "[COLOR=#C9D1D9]Лидер: отсутствует[/COLOR]"
         else
             for _, r in ipairs(items) do
                 out[#out + 1] = string.format("[COLOR=#C9D1D9]Лидер: %s | Онлайн: %s | %s[/COLOR]", r.nick, ldHM(r.min),
