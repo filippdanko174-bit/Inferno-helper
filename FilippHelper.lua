@@ -2676,22 +2676,27 @@ local function setupGui()
             if ldScope == "all" or r.cat == ldScope then
                 shown = shown + 1
                 local done = r.min >= LD.norm[r.cat]
+                local w = imgui.GetContentRegionAvail().x
                 imgui.TextColored(GRAY, U(r.fr))
-                imgui.SameLine(fs * 13) imgui.Text(U(r.nick))
-                imgui.SameLine(fs * 23) imgui.TextColored(r.online and GREEN or GRAY, U(ldHM(r.min)))
-                imgui.SameLine(fs * 27) imgui.TextColored(done and GREEN or RED, U(done and "Выполнено" or "Не выполнено"))
-                local armed = LD.arm and LD.arm.nick == r.nick and os.clock() - LD.arm.t < 5
-                if armed then imgui.PushStyleColor(imgui.Col.Button, RED) end
-                imgui.SameLine(fs * 35)
-                local clicked = imgui.Button(U(armed and "Точно?" or "Снять") .. "##ldof" .. i, V2(fs * 5, 0))
-                if armed then imgui.PopStyleColor() end
-                if clicked then
-                    if armed then
-                        LD.arm = nil
-                        local nm = r.nick
-                        post(function() safeSend("/offleader " .. nm) fmsg("{FFFF00}/offleader " .. nm) end)
-                    else LD.arm = { nick = r.nick, t = os.clock() } end
+                imgui.SameLine(w * 0.28) imgui.Text(U(r.nick))
+                imgui.SameLine(w * 0.51) imgui.TextColored(r.online and GREEN or GRAY, U(ldHM(r.min)))
+                imgui.SameLine(w * 0.58) imgui.TextColored(done and GREEN or RED, U(done and "Выполнено" or "Не выполнено"))
+                local function act(kind, label, cmd, x, bw)
+                    local armed = LD.arm and LD.arm.nick == r.nick and LD.arm.kind == kind and os.clock() - LD.arm.t < 5
+                    if armed then imgui.PushStyleColor(imgui.Col.Button, RED) end
+                    imgui.SameLine(x)
+                    local clicked = imgui.Button(U(armed and "Точно?" or label) .. "##ld" .. kind .. i, V2(bw, 0))
+                    if armed then imgui.PopStyleColor() end
+                    if clicked then
+                        if armed then
+                            LD.arm = nil
+                            local nm = r.nick
+                            post(function() safeSend(cmd .. " " .. nm) fmsg("{FFFF00}" .. cmd .. " " .. nm) end)
+                        else LD.arm = { nick = r.nick, t = os.clock(), kind = kind } end
+                    end
                 end
+                act("off", "Снять", "/offleader", w * 0.775, w * 0.105)
+                act("vig", "Выговор", "/avig", w * 0.885, w * 0.115)
             end
         end
         if shown == 0 then hint("Пусто. Нажмите «Обновить».") end
@@ -2704,7 +2709,7 @@ local function setupGui()
         if imgui.Button(U("Сохранить в файл") .. "##ldsave", V2(fs * 11, fs * 2)) then
             post(function() LD.cmdNorm(ldScope) end)
         end
-        hint("Снять: нажмите «Снять», затем «Точно?» в течение 5 секунд.")
+        hint("Снять (/offleader) и Выговор (/avig): нажмите кнопку, затем «Точно?» в течение 5 секунд.")
     end }
 
     local function drawBody()
