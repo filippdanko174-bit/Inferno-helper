@@ -545,17 +545,13 @@ local function armAutoMp(force)
     safeSend("/mp")
 end
 
-local LD = { expect = nil, got = false, busy = false, status = "", all = {}, online = {}, rows = {}, raw = {}, rawMiss = {}, autoClose = true,
+local LD = { expect = nil, got = false, busy = false, status = "", all = {}, online = {}, rows = {}, raw = {}, rawMiss = {},
     norm = { ghetto = 120, mafia = 120, gov = 120 }, pageIdx = 14 }
 
 function ev.onShowDialog(id, style, title, b1, b2, text)
     if LD.expect and LD.capture then
         local okC, swallow = pcall(LD.capture, id, style, title, text)
         if okC and swallow then return false end
-    end
-    if LD.autoClose and not LD.expect and LD.manual then
-        local okM, swallowM = pcall(LD.manual, id, style, title, text)
-        if okM and swallowM then return false end
     end
     if not autoMp.armed then return end
     if os.clock() - autoMp.t0 > 6 then autoMp.armed = false return end
@@ -1932,20 +1928,6 @@ function LD.capture(id, style, title, text)
     return true
 end
 
-function LD.manual(id, style, title, text)
-    local t = fromGame(tostring(title or ""))
-    if not (t:find("идеров", 1, true) or t:find("идеры", 1, true)) then return false end
-    local list = ldParse(text)
-    if #list == 0 then return false end
-    if t:find("нлайн", 1, true) then LD.online = list else LD.all = list end
-    LD.merge()
-    lua_thread.create(function()
-        wait(200)
-        pcall(sampSendDialogResponse, id, 0, 0, "")
-    end)
-    return true
-end
-
 function LD.merge()
     local src = (#LD.all > 0) and LD.all or LD.online
     local on, seen, rows = {}, {}, {}
@@ -2107,7 +2089,7 @@ end
 function LD.saveNorm()
     pcall(function()
         local f = assert(io.open(ldDir() .. "/FilippHelper_norm_cfg.txt", "wb"))
-        f:write("ghetto=", LD.norm.ghetto, "\r\nmafia=", LD.norm.mafia, "\r\ngov=", LD.norm.gov, "\r\nautoclose=", LD.autoClose and 1 or 0, "\r\n")
+        f:write("ghetto=", LD.norm.ghetto, "\r\nmafia=", LD.norm.mafia, "\r\ngov=", LD.norm.gov, "\r\n")
         f:close()
     end)
 end
@@ -2117,8 +2099,7 @@ function LD.loadNorm()
     if not f then return end
     for line in f:lines() do
         local k, v = line:match("^(%a+)=(%d+)")
-        if k == "autoclose" then LD.autoClose = (v == "1")
-        elseif k and LD.norm[k] then LD.norm[k] = math.min(1440, tonumber(v)) end
+        if k and LD.norm[k] then LD.norm[k] = math.min(1440, tonumber(v)) end
     end
     f:close()
 end
@@ -2704,7 +2685,6 @@ local function setupGui()
 
     local ldBuf = { ghetto = imgui.new.int(LD.norm.ghetto), mafia = imgui.new.int(LD.norm.mafia), gov = imgui.new.int(LD.norm.gov) }
     local ldScope, ldFmt = "all", "forum"
-    local ldAutoBuf = imgui.new.bool(LD.autoClose)
     local LD_SCOPES = { { "all", "Все" }, { "ghetto", "Гетто" }, { "mafia", "Мафии" }, { "gov", "Госс" } }
     pages[14] = { "Лидеры", function()
         title("Лидеры", "Список из /aleaders, онлайн из /leaders, норма и снятие")
@@ -2738,10 +2718,6 @@ local function setupGui()
                 post(LD.saveNorm)
             end
             imgui.PopItemWidth()
-        end
-        if imgui.Checkbox(U("Автоматически закрывать окно /leaders"), ldAutoBuf) then
-            LD.autoClose = ldAutoBuf[0] and true or false
-            post(LD.saveNorm)
         end
         imgui.Spacing() imgui.Separator() imgui.Spacing()
         local shown = 0
