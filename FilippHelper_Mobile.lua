@@ -1991,7 +1991,7 @@ function LD.refresh()
             end
             ask("/aleaders", "all")
             LD.status = "Запрашиваю /leaders..."
-            wait(1200)
+            wait(2000)
             ask("/leaders", "online")
             LD.merge()
             LD.saveRaw()
