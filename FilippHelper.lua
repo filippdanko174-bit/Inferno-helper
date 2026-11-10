@@ -99,18 +99,50 @@ local function saveBinds()
     if not ok then bmsg("Не удалось сохранить биндер в файл!") end
 end
 
+local bindStop = false
+
+local function bindTags(line, arg, param)
+    local myId, myNick = "", ""
+    local okI, id = pcall(function() local _, i = sampGetPlayerIdByCharHandle(PLAYER_PED) return i end)
+    if okI and id then
+        myId = tostring(id)
+        local okN, nick = pcall(sampGetPlayerNickname, id)
+        if okN and nick then myNick = nick end
+    end
+    line = line:gsub("{id}", function() return param end)
+    line = line:gsub("{arg}", function() return arg end)
+    line = line:gsub("{myid}", function() return myId end)
+    line = line:gsub("{mynick}", function() return myNick end)
+    return line
+end
+
 local function runBind(name, arg)
     local b = binds[name]
     if not b then return end
+    if bindRunning then bmsg("Дождитесь окончания предыдущего бинда (или /fstop).") return end
     arg = arg or ""
-    local param = (arg ~= "") and arg or (watchedId or "")
-    local lines = {}
-    for i, l in ipairs(b.lines) do
-        lines[i] = l:gsub("{id}", function() return param end):gsub("{arg}", function() return arg end)
-    end
-    if bindRunning then bmsg("Дождитесь окончания предыдущего бинда.") return end
-    bindRunning = true
-    sendSeq(lines, b.delay, function() bindRunning = false end)
+    local param = tostring((arg ~= "") and arg or (watchedId or ""))
+    local src, delay = b.lines, b.delay
+    bindRunning, bindStop = true, false
+    lua_thread.create(function()
+        local ok, err = pcall(function()
+            local n = #src
+            for i = 1, n do
+                if bindStop then break end
+                local line = bindTags(src[i], arg, param)
+                local w = line:match("{wait%((%d+)%)}")
+                line = trim((line:gsub("{wait%(%d+%)}", "")))
+                if w then wait(math.min(30000, tonumber(w) or 0)) end
+                if bindStop then break end
+                if line ~= "" then
+                    safeSend(line)
+                    if i < n then wait(delay) end
+                end
+            end
+        end)
+        bindRunning = false
+        if not ok then print("[FH] bind error: " .. tostring(err)) end
+    end)
 end
 
 local function registerBind(name)
@@ -150,15 +182,16 @@ local function bindHelp()
         "{66CCFF}[ СВОЙ БИНДЕР ]\n\n{33CC33}/fbind {FFFFFF}- отдельное окно биндера (создание и правка без команд).\n\n" ..
         "{FFFFFF}Создаёт свои команды: набрали {FFFF00}/имя{FFFFFF} -- отправились все строки бинда по очереди.\n\n" ..
         "{66CCFF}/bnd add имя текст {FFFFFF}- создать бинд / добавить строку.\n" ..
-        "{FFFFFF}  Несколько строк сразу разделяйте {FFFF00};;{FFFFFF}, например:\n" ..
-        "{FFFF00}  /bnd add hi /aad Привет! ;; /aad Как дела?\n" ..
+        "{FFFFFF}  Несколько строк сразу разделяйте {FFFF00}&{FFFFFF} (или {FFFF00};;{FFFFFF}), например:\n" ..
+        "{FFFF00}  /bnd add hi /aad Привет! & {wait(2000)} /aad Как дела?\n" ..
         "{66CCFF}/bnd rm имя N {FFFFFF}- удалить строку N.\n" ..
         "{66CCFF}/bnd del имя {FFFFFF}- удалить бинд целиком.\n" ..
         "{66CCFF}/bnd delay имя мс {FFFFFF}- пауза между строками (300-10000, по умолчанию 1100).\n" ..
         "{66CCFF}/bnd show имя {FFFFFF}- показать строки бинда.\n" ..
         "{66CCFF}/bnd list {FFFFFF}- список всех биндов.\n\n" ..
         "{9933FF}Подстановки в тексте: {FFFF00}{id}{FFFFFF} - ID из команды (/имя 12) или ID из /re,\n" ..
-        "{FFFF00}{arg}{FFFFFF} - всё, что написано после команды.\n" ..
+        "{FFFF00}{arg}{FFFFFF} - всё после команды, {FFFF00}{myid}{FFFFFF} и {FFFF00}{mynick}{FFFFFF} - ваш ID и ник,\n" ..
+        "{FFFF00}{wait(мс)}{FFFFFF} - пауза перед строкой, {FFFF00}/fstop{FFFFFF} - остановить бинд.\n" ..
         "{9933FF}Имя: латиница, цифры и _ (до 20 символов). Лимит: " .. BIND_MAX .. " биндов по " .. BIND_LINES .. " строк.",
         "Закрыть", "", 0)
 end
@@ -173,7 +206,7 @@ local function bindAdd(name, text)
         b = { delay = SEND_GAP, lines = {} }
     end
     local added = 0
-    for piece in (text .. ";;"):gmatch("(.-);;") do
+    for piece in ((text:gsub("%s*&%s*", ";;")) .. ";;"):gmatch("(.-);;") do
         piece = trim(piece)
         if piece ~= "" then
             if #b.lines >= BIND_LINES then break end
@@ -2672,6 +2705,7 @@ end
 
 local function registerCommands(reg)
     registerExtra(reg)
+    reg("fstop", function() bindStop = true bmsg("Бинд остановлен.") end)
     reg("fh", function()
         if guiState and guiState.ready() then guiState.toggle() else uiMenu() end
     end)
