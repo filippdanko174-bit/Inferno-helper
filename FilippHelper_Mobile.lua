@@ -14,7 +14,7 @@ local function fromUi(s) return s end
 local function toGame(s) if enc8 then return enc8:decode(s) end return s end
 local function fromGame(s) if enc8 then return enc8:encode(s) end return s end
 
-local VERSION = "1.4.4"
+local VERSION = "1.4.5"
 local MAX_CHAT_LEN = 128
 local SEND_GAP = 1100
 local MAX_REPORTS = 15
@@ -3114,39 +3114,41 @@ local function setupGui()
         if shown == 0 then hint("Лидеров нет. Нажмите «Обновить всё».") end
         imgui.Spacing() imgui.Separator() imgui.Spacing()
 
-        imgui.TextColored(ACC, U("Следящие"))
-        imgui.Spacing()
-        local shownA = 0
-        for i, a in ipairs(AD.list) do
-            if ldScope == "all" or AD.cat(a.role) == ldScope then
-                shownA = shownA + 1
-                local r = AD.res[a.nick:lower()]
-                local w = imgui.GetContentRegionAvail().x
-                imgui.Text(EU(a.nick))
-                imgui.SameLine(w * 0.34) imgui.TextColored(GRAY, EU(a.role))
-                imgui.SameLine(w * 0.64)
-                if r and r.value then
-                    local done = r.value >= AD.norm
-                    imgui.TextColored(done and GREEN or RED, U(nrHM(r.value) .. "  " .. (done and "Выполнено" or "Не выполнено")))
-                else
-                    imgui.TextColored(GRAY, U(r and "нет данных" or "не проверен"))
+        if ldFmt ~= "forum" then
+            imgui.TextColored(ACC, U("Следящие"))
+            imgui.Spacing()
+            local shownA = 0
+            for i, a in ipairs(AD.list) do
+                if ldScope == "all" or AD.cat(a.role) == ldScope then
+                    shownA = shownA + 1
+                    local r = AD.res[a.nick:lower()]
+                    local w = imgui.GetContentRegionAvail().x
+                    imgui.Text(EU(a.nick))
+                    imgui.SameLine(w * 0.34) imgui.TextColored(GRAY, EU(a.role))
+                    imgui.SameLine(w * 0.64)
+                    if r and r.value then
+                        local done = r.value >= AD.norm
+                        imgui.TextColored(done and GREEN or RED, U(nrHM(r.value) .. "  " .. (done and "Выполнено" or "Не выполнено")))
+                    else
+                        imgui.TextColored(GRAY, U(r and "нет данных" or "не проверен"))
+                    end
+                    imgui.Indent(fs * 1.5)
+                    if imgui.Button(U("Проверить") .. "##adck" .. i, V2(fs * 6, 0)) then
+                        local one = { a }
+                        post(function() AD.run(one) end)
+                    end
+                    imgui.SameLine()
+                    if imgui.Button(U("Убрать") .. "##addel" .. i, V2(fs * 5, 0)) then
+                        local nk = a.nick
+                        post(function() AD.remove(nk) end)
+                    end
+                    imgui.Unindent(fs * 1.5)
+                    imgui.Spacing()
                 end
-                imgui.Indent(fs * 1.5)
-                if imgui.Button(U("Проверить") .. "##adck" .. i, V2(fs * 6, 0)) then
-                    local one = { a }
-                    post(function() AD.run(one) end)
-                end
-                imgui.SameLine()
-                if imgui.Button(U("Убрать") .. "##addel" .. i, V2(fs * 5, 0)) then
-                    local nk = a.nick
-                    post(function() AD.remove(nk) end)
-                end
-                imgui.Unindent(fs * 1.5)
-                imgui.Spacing()
             end
+            if shownA == 0 then hint("Следящих нет. Добавьте нлист в настройках выше.") end
+            imgui.Spacing() imgui.Separator() imgui.Spacing()
         end
-        if shownA == 0 then hint("Следящих нет. Добавьте нлист в настройках выше.") end
-        imgui.Spacing() imgui.Separator() imgui.Spacing()
 
         if primary("Скопировать норму##ldcopy", V2(fs * 11, fs * 2)) then
             imgui.SetClipboardText(toUi(LD.build(ldScope, ldFmt)))
