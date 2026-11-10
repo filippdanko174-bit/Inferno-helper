@@ -1830,7 +1830,7 @@ local MENU_ROWS = {
     { "/jj /mut /ww [ID]", "jail, mute, warn - вставят команду в ввод" },
     { "/bb /uw /uj /unm /ub", "ban, unwarn, unjail, unmute, unban" },
     { "/ib /ip /bip /ofl /mkl", "iban, pgetip, banip, offleader, makeleader" },
-    { "/lds /ldrefresh /ldnorm [ghetto|mafia|gov|all]", "лидеры: окно, обновить из /aleaders и /leaders, норма в BBCode в файл" },
+    { "/lds /ldrefresh /ldnorm [ghetto|mafia|gov|all]", "лидеры: окно, обновить из /aleaders и /leaders, норма в файл (list - простой список, иначе BBCode)" },
     { "/gs /inv [ID]", "getstats, checkinv (ID или из /re)" },
     { "/fuel /fc /gh /wh /gzc /bp", "fuelcars, ghetto, warehouse, gzcolor, setbizprod" },
     { "/spc /dva /dvs", "spawncars; удаление админ-каров (таймер 15 с в /a); то же + spawncars" },
@@ -2038,6 +2038,44 @@ function LD.report(scope)
     return table.concat(out, "\n")
 end
 
+function LD.plain(scope)
+    local out = {}
+    local function add(name, items)
+        if #items == 0 then
+            out[#out + 1] = name .. ": отсутствует"
+        else
+            for _, r in ipairs(items) do out[#out + 1] = string.format("%s: %s | %s", name, r.nick, ldHM(r.min)) end
+        end
+    end
+    if scope == "all" or scope == "ghetto" then
+        for _, g in ipairs(LD_GHETTO) do
+            local items = {}
+            for _, r in ipairs(LD.rows) do
+                if r.cat == "ghetto" and r.fr:lower():find(g.key, 1, true) then items[#items + 1] = r end
+            end
+            add(g.name, items)
+        end
+    end
+    for _, cat in ipairs { "mafia", "gov" } do
+        if scope == "all" or scope == cat then
+            local order, by = {}, {}
+            for _, r in ipairs(LD.rows) do
+                if r.cat == cat then
+                    if not by[r.fr] then by[r.fr] = {} order[#order + 1] = r.fr end
+                    by[r.fr][#by[r.fr] + 1] = r
+                end
+            end
+            for _, fr in ipairs(order) do add(fr, by[fr]) end
+        end
+    end
+    return table.concat(out, "\n")
+end
+
+function LD.build(scope, fmt)
+    if fmt == "list" then return LD.plain(scope) end
+    return LD.report(scope)
+end
+
 function LD.saveReport(text)
     local path = ldDir() .. "/FilippHelper_norm.txt"
     local ok = pcall(function()
@@ -2068,10 +2106,13 @@ end
 pcall(LD.loadNorm)
 
 function LD.cmdNorm(p)
-    p = trim(p or ""):lower()
-    local scope = ({ ghetto = true, mafia = true, gov = true, all = true })[p] and p or "all"
+    local scope, fmt = "all", "forum"
+    for w in trim(p or ""):lower():gmatch("%S+") do
+        if w == "list" then fmt = "list"
+        elseif ({ ghetto = true, mafia = true, gov = true, all = true })[w] then scope = w end
+    end
     if #LD.rows == 0 then fmsg("Список лидеров пуст. Сначала /ldrefresh.") return end
-    local path = LD.saveReport(LD.report(scope))
+    local path = LD.saveReport(LD.build(scope, fmt))
     if path then fmsg("{66FF66}Норма сохранена в файл: {FFFFFF}" .. path)
     else fmsg("{FF6666}Не удалось сохранить файл нормы.") end
 end
@@ -2643,7 +2684,7 @@ local function setupGui()
     end
 
     local ldBuf = { ghetto = imgui.new.int(LD.norm.ghetto), mafia = imgui.new.int(LD.norm.mafia), gov = imgui.new.int(LD.norm.gov) }
-    local ldScope = "all"
+    local ldScope, ldFmt = "all", "forum"
     local LD_SCOPES = { { "all", "Все" }, { "ghetto", "Гетто" }, { "mafia", "Мафии" }, { "gov", "Госс" } }
     pages[14] = { "Лидеры", function()
         title("Лидеры", "Список из /aleaders, онлайн из /leaders, норма и снятие")
@@ -2656,6 +2697,14 @@ local function setupGui()
             local act = ldScope == sc[1]
             if act then imgui.PushStyleColor(imgui.Col.Button, ACC) end
             if imgui.Button(U(sc[2]) .. "##ldsc" .. i, V2(fs * 6, fs * 1.8)) then ldScope = sc[1] end
+            if act then imgui.PopStyleColor() end
+        end
+        imgui.Spacing()
+        for i, f in ipairs { { "forum", "Для форума" }, { "list", "Простой список" } } do
+            if i > 1 then imgui.SameLine() end
+            local act = ldFmt == f[1]
+            if act then imgui.PushStyleColor(imgui.Col.Button, ACC) end
+            if imgui.Button(U(f[2]) .. "##ldfmt" .. i, V2(fs * 9, fs * 1.8)) then ldFmt = f[1] end
             if act then imgui.PopStyleColor() end
         end
         imgui.Spacing()
@@ -2702,12 +2751,12 @@ local function setupGui()
         if shown == 0 then hint("Пусто. Нажмите «Обновить».") end
         imgui.Spacing() imgui.Separator() imgui.Spacing()
         if primary("Скопировать норму##ldcopy", V2(fs * 11, fs * 2)) then
-            imgui.SetClipboardText(toUi(LD.report(ldScope)))
+            imgui.SetClipboardText(toUi(LD.build(ldScope, ldFmt)))
             LD.status = "Норма скопирована в буфер."
         end
         imgui.SameLine()
         if imgui.Button(U("Сохранить в файл") .. "##ldsave", V2(fs * 11, fs * 2)) then
-            post(function() LD.cmdNorm(ldScope) end)
+            post(function() LD.cmdNorm(ldScope .. (ldFmt == "list" and " list" or "")) end)
         end
         hint("Снять (/offleader) и Выговор (/avig): нажмите кнопку, затем «Точно?» в течение 5 секунд.")
     end }
