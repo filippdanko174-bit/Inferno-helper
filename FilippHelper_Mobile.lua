@@ -14,7 +14,7 @@ local function fromUi(s) return s end
 local function toGame(s) if enc8 then return enc8:decode(s) end return s end
 local function fromGame(s) if enc8 then return enc8:encode(s) end return s end
 
-local VERSION = "1.4.5"
+local VERSION = "1 release"
 local MAX_CHAT_LEN = 128
 local SEND_GAP = 1100
 local MAX_REPORTS = 15
@@ -2085,6 +2085,7 @@ function LD.plain(scope)
 end
 
 function LD.build(scope, fmt)
+    if scope == "lead" then return LD.lead() end
     if fmt == "struct" then return LD.struct(scope) end
     if fmt == "list" then return LD.plain(scope) end
     return LD.report(scope)
@@ -2127,10 +2128,12 @@ function LD.cmdNorm(p)
     local scope, fmt = "all", "struct"
     for w in trim(p or ""):lower():gmatch("%S+") do
         if w == "list" or w == "struct" or w == "forum" then fmt = w
-        elseif ({ ghetto = true, mafia = true, gov = true, all = true })[w] then scope = w end
+        elseif ({ ghetto = true, mafia = true, gov = true, all = true, lead = true })[w] then scope = w end
     end
     if #LD.rows == 0 and not (fmt == "struct" and #AD.list > 0) then fmsg("Список лидеров пуст. Сначала /ldrefresh.") return end
-    local path = LD.saveReport(LD.build(scope, fmt))
+    local text = LD.build(scope, fmt)
+    if scope == "lead" then text = nrOut(text) end
+    local path = LD.saveReport(text)
     if path then fmsg("{66FF66}Норма сохранена в файл: {FFFFFF}" .. path)
     else fmsg("{FF6666}Не удалось сохранить файл нормы.") end
 end
@@ -2413,6 +2416,57 @@ function LD.updateAll()
         wait(2500)
         AD.run(AD.list)
     end)
+end
+
+local NR_EMO = { R = "\240\159\141\146", L = "\240\159\140\153", G = "\240\159\148\174", P = "\240\159\147\140" }
+
+local function nrOut(s)
+    return (toUi(s):gsub("<<(%a)>>", NR_EMO))
+end
+
+function AD.rank(role)
+    local low = " " .. lowAny(role) .. " "
+    if low:find("куратор", 1, true) and (low:find("сервер", 1, true) or low:find(" кс ", 1, true)) or (low:find(" кс ", 1, true) and low:find("зам", 1, true)) then
+        if low:find("зам", 1, true) then return "R", 2, "Заместитель Куратора Сервера" end
+        return "R", 1, "Куратор Сервер"
+    end
+    if low:find(" зга ", 1, true) or (low:find("главн", 1, true) and low:find("администратор", 1, true) and low:find("зам", 1, true)) then
+        return "L", 2, "Заместитель Главного Администратора"
+    end
+    if low:find(" га ", 1, true) or (low:find("главн", 1, true) and low:find("администратор", 1, true)) then
+        return "L", 1, "Главный Администратор"
+    end
+    if low:find(" gs ", 1, true) or low:find(" гс ", 1, true) then
+        local c = AD.cat(role)
+        if c == "ghetto" then return "G", 1, "Главный Следящий за Нелегальными Группировками" end
+        if c == "gov" then return "G", 2, "Главный Следящий за Государственными Структурами" end
+        if c == "mafia" then return "G", 3, "Главный Следящий за Преступными Группировками" end
+    end
+    return nil
+end
+
+function LD.lead()
+    local date = os.date("%d.%m")
+    local out = { "норма " .. date, "" }
+    for _, g in ipairs { { "R", "КРАСНАЯ АДМИНИСТРАЦИЯ" }, { "L", "ВЕДУЩАЯ АДМИНИСТРАЦИЯ" }, { "G", "ГЛАВНЫЕ СЛЕДЯЩИЕ" } } do
+        local items = {}
+        for i, a in ipairs(AD.list) do
+            local k, ord, ttl = AD.rank(a.role)
+            if k == g[1] then
+                local r = AD.res[a.nick:lower()]
+                local t = (r and r.value) and string.format("%dч %dм", math.floor(r.value / 60), r.value % 60) or "нет данных"
+                items[#items + 1] = { ord = ord, i = i, line = string.format("<<%s>> %s — %s — %s", k, ttl, a.nick, t) }
+            end
+        end
+        table.sort(items, function(x, y) if x.ord ~= y.ord then return x.ord < y.ord end return x.i < y.i end)
+        out[#out + 1] = "<<P>> " .. g[2] .. ":"
+        out[#out + 1] = ""
+        if #items == 0 then out[#out + 1] = "отсутствуют" out[#out + 1] = "" end
+        for _, it in ipairs(items) do out[#out + 1] = it.line out[#out + 1] = "" end
+        out[#out + 1] = "#норма " .. date
+        out[#out + 1] = ""
+    end
+    return table.concat(out, "\n")
 end
 
 local function setupGui()
@@ -2950,6 +3004,15 @@ local function setupGui()
         imgui.SameLine()
         if imgui.Button(U("Сохранить и проверить") .. "##aitest", V2(fs * 12, fs * 2)) then post(function() saveAi() AI.test() end) end
         if AI.status ~= "" then imgui.TextWrapped(toUi(AI.status)) end
+        imgui.Spacing() imgui.Separator() imgui.Spacing()
+        title("О скрипте")
+        imgui.Text(U("FilippHelper - крутой помощник администратора: репорты, раздачи, проверки,"))
+        imgui.Text(U("биндер, норма лидеров и следящих. Версия " .. VERSION .. "."))
+        imgui.Spacing()
+        imgui.TextColored(GRAY, U("Разработчики:"))
+        imgui.Text(U("Filipp_Evans - Босс вайбкода"))
+        imgui.Text(U("Bruno_Heller - Начинающий вайбкодер"))
+        imgui.Text(U("Claude - Босс кода"))
     end }
 
     pages[9] = { "Занять", function()
@@ -2984,7 +3047,7 @@ local function setupGui()
 
     local ldBuf = { ghetto = imgui.new.int(LD.norm.ghetto), mafia = imgui.new.int(LD.norm.mafia), gov = imgui.new.int(LD.norm.gov) }
     local ldScope, ldFmt = "all", "struct"
-    local LD_SCOPES = { { "all", "Все" }, { "ghetto", "Гетто" }, { "mafia", "Мафии" }, { "gov", "Госс" } }
+    local LD_SCOPES = { { "all", "Все" }, { "ghetto", "Гетто" }, { "mafia", "Мафии" }, { "gov", "Госс (ТД)" }, { "lead", "Ведущие" } }
     local adNorm = imgui.new.int(AD.norm)
     local adKey = buf(40)
     ffi.copy(adKey, cutUtf8(toUi(AD.key), 39))
@@ -3066,7 +3129,7 @@ local function setupGui()
             if i > 1 then imgui.SameLine() end
             local act = ldScope == sc[1]
             if act then imgui.PushStyleColor(imgui.Col.Button, ACC) end
-            if imgui.Button(U(sc[2]) .. "##ldsc" .. i, V2(fs * 6, fs * 1.8)) then ldScope = sc[1] end
+            if imgui.Button(U(sc[2]) .. "##ldsc" .. i, V2(fs * 7, fs * 1.8)) then ldScope = sc[1] end
             if act then imgui.PopStyleColor() end
         end
         imgui.Spacing()
@@ -3081,45 +3144,47 @@ local function setupGui()
         if imgui.CollapsingHeader(U("Настройки нормы и список следящих") .. "##nrset") then nrSettings() end
         imgui.Spacing() imgui.Separator() imgui.Spacing()
 
-        imgui.TextColored(ACC, U("Лидеры"))
-        imgui.Spacing()
-        local shown = 0
-        for i, r in ipairs(LD.rows) do
-            if ldScope == "all" or r.cat == ldScope then
-                shown = shown + 1
-                local done = r.min >= LD.norm[r.cat]
-                local w = imgui.GetContentRegionAvail().x
-                imgui.TextColored(GRAY, EU(r.fr))
-                imgui.SameLine(w * 0.30) imgui.Text(EU(r.nick))
-                imgui.SameLine(w * 0.58) imgui.TextColored(r.online and GREEN or GRAY, U(ldHM(r.min)))
-                imgui.SameLine(w * 0.70) imgui.TextColored(done and GREEN or RED, U(done and "Выполнено" or "Не выполнено"))
-                imgui.Indent(fs * 1.5)
-                local armed = LD.arm and LD.arm.nick == r.nick and os.clock() - LD.arm.t < 5
-                if armed then imgui.PushStyleColor(imgui.Col.Button, RED) end
-                local clicked = imgui.Button(U(armed and "Точно?" or "Снять") .. "##ldoff" .. i, V2(fs * 5, 0))
-                if armed then imgui.PopStyleColor() end
-                if clicked then
-                    if armed then
-                        LD.arm = nil
-                        local cmd = LD.press("off", r.nick)
-                        post(function() safeSend(cmd) fmsg("{FFFF00}" .. cmd) end)
-                    else
-                        LD.arm = { nick = r.nick, t = os.clock(), kind = "off" }
+        if ldScope ~= "lead" then
+            imgui.TextColored(ACC, U("Лидеры"))
+            imgui.Spacing()
+            local shown = 0
+            for i, r in ipairs(LD.rows) do
+                if ldScope == "all" or r.cat == ldScope then
+                    shown = shown + 1
+                    local done = r.min >= LD.norm[r.cat]
+                    local w = imgui.GetContentRegionAvail().x
+                    imgui.TextColored(GRAY, EU(r.fr))
+                    imgui.SameLine(w * 0.30) imgui.Text(EU(r.nick))
+                    imgui.SameLine(w * 0.58) imgui.TextColored(r.online and GREEN or GRAY, U(ldHM(r.min)))
+                    imgui.SameLine(w * 0.70) imgui.TextColored(done and GREEN or RED, U(done and "Выполнено" or "Не выполнено"))
+                    imgui.Indent(fs * 1.5)
+                    local armed = LD.arm and LD.arm.nick == r.nick and os.clock() - LD.arm.t < 5
+                    if armed then imgui.PushStyleColor(imgui.Col.Button, RED) end
+                    local clicked = imgui.Button(U(armed and "Точно?" or "Снять") .. "##ldoff" .. i, V2(fs * 5, 0))
+                    if armed then imgui.PopStyleColor() end
+                    if clicked then
+                        if armed then
+                            LD.arm = nil
+                            local cmd = LD.press("off", r.nick)
+                            post(function() safeSend(cmd) fmsg("{FFFF00}" .. cmd) end)
+                        else
+                            LD.arm = { nick = r.nick, t = os.clock(), kind = "off" }
+                        end
                     end
+                    imgui.Unindent(fs * 1.5)
+                    imgui.Spacing()
                 end
-                imgui.Unindent(fs * 1.5)
-                imgui.Spacing()
             end
+            if shown == 0 then hint("Лидеров нет. Нажмите «Обновить всё».") end
+            imgui.Spacing() imgui.Separator() imgui.Spacing()
         end
-        if shown == 0 then hint("Лидеров нет. Нажмите «Обновить всё».") end
-        imgui.Spacing() imgui.Separator() imgui.Spacing()
 
-        if ldFmt ~= "forum" then
+        if ldFmt ~= "forum" or ldScope == "lead" then
             imgui.TextColored(ACC, U("Следящие"))
             imgui.Spacing()
             local shownA = 0
             for i, a in ipairs(AD.list) do
-                if ldScope == "all" or AD.cat(a.role) == ldScope then
+                if ldScope == "all" or AD.cat(a.role) == ldScope or (ldScope == "lead" and AD.rank(a.role)) then
                     shownA = shownA + 1
                     local r = AD.res[a.nick:lower()]
                     local w = imgui.GetContentRegionAvail().x
@@ -3151,7 +3216,7 @@ local function setupGui()
         end
 
         if primary("Скопировать норму##ldcopy", V2(fs * 11, fs * 2)) then
-            imgui.SetClipboardText(toUi(LD.build(ldScope, ldFmt)))
+            imgui.SetClipboardText(nrOut(LD.build(ldScope, ldFmt)))
             LD.status = "Норма скопирована в буфер."
         end
         imgui.SameLine()
